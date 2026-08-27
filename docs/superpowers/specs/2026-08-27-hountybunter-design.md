@@ -47,6 +47,7 @@ resolved in favour of knowledge durability when the two conflict.
 | Auth, multi-user, cloud sync | Single local user. Adds an axis of complexity nobody asked for |
 | A GitHub Issues replacement | `gh` is the source of truth for anything linked to an issue |
 | Vector / embedding search | SQLite FTS5 + grep first. Only add embeddings when FTS5 demonstrably fails |
+| A Mem0 / Zep / Letta-style memory layer | Those solve *conversational* memory — recalling facts about a user across sessions — and are benchmarked on LoCoMo and LongMemEval, which "only test conversational memory". This tool needs decision *provenance*: the question, the options rejected, the anchor in the repo. Structure and anchoring, not fuzzy recall |
 | Edits or commits to the user's source code | Read-only on source. No auto-edit, no auto-commit, ever. Note files are the one thing written, and only where §6.2 allows |
 | A combat minigame | Progress comes from real signals, never from clicking |
 | An Electron app or VS Code extension | See §3.2 — avoiding Electron removes a whole class of native-module failure |
@@ -236,7 +237,32 @@ Generic hunting and guild vocabulary is free.
 
 Five entities. The fifth is the point of the project.
 
-### Note — the decision record
+### 6.0 Capture has two tiers, because ceremony is what kills this
+
+The dominant failure mode for decision records is not a bad schema — it is
+abandonment. Published experience with ADRs is blunt: almost every team adopts
+them and almost none maintain them two years later, and the pattern "has very
+little to do with template choice." The named causes are operational: updating
+the file is friction, and the decision happened somewhere else. Teams do not
+keep records alive when each one feels like a mini whitepaper.
+
+The full note below has twelve frontmatter fields. That *is* a mini whitepaper.
+So capture is two-tier:
+
+| Tier | Cost | Shape |
+|---|---|---|
+| **Jot** | one line, seconds | `<project> · <one sentence>` appended to a dated file. No fields, no ceremony |
+| **Note** | minutes | The full record below, written when a jot turns out to matter |
+
+Required fields on a full note are only **`question`** and **`chosen`**.
+Everything else — `rejected`, `evidence`, `confidence`, `review_after` — is
+optional and can be filled in later. A note with one rejected option is worth
+more than a perfect note that was never written.
+
+Promotion is a command, not a migration: a jot keeps its timestamp and becomes
+the note's first body paragraph.
+
+### 6.1 Note — the decision record
 
 A markdown file on disk with YAML frontmatter, indexed in SQLite.
 
@@ -296,7 +322,7 @@ The read-only rule (§2, §10) is therefore precisely: **the tool never modifies
 source code and never commits.** It writes note files, to its own store by
 default, or to an explicitly configured repository path.
 
-### SQLite schema (index and events only)
+### 6.3 SQLite schema (index and events only)
 
 ```sql
 projects(path PK, name, git_remote, last_seen_at)
@@ -488,7 +514,7 @@ Each phase ends with something usable, so the project survives being paused.
 |---|---|---|
 | 1 | `core` domain + SQLite schema + note read/write | `rebuild-from-scratch` passes over note files alone (no transcripts yet) |
 | 2 | Transcript reader + backfill | All existing local transcripts ingest; parser fixtures pass |
-| 3 | CLI: capture a note, search notes, list sessions | Usable daily without any UI |
+| 3 | CLI: **jot** (one line), promote to note, search, list sessions | Usable daily without any UI. `jot` must be fast enough to use mid-task without breaking flow — that is the acceptance criterion, not a nice-to-have |
 | 4 | Hook receiver + plugin | Live events arrive; hooks proven non-blocking |
 | 5 | Web UI, non-pixel: projects, sessions, notes | Everything visible in a browser |
 | 6 | PTY + `xterm.js` hunt view | A session can be launched and driven from the UI |
@@ -512,6 +538,7 @@ Phases 4+ get their own plans once phase 3 has been used for real.
 
 | Risk | Severity | Mitigation |
 |---|---|---|
+| **Nobody keeps writing the notes** | **Highest** | This is the documented cause of death for decision records, and it is behavioural, not architectural. Three defences: two-tier capture so a record costs one line (§6.0); the tool sits inside the session where the decision actually happens, so recording is not a separate errand; and staleness detection (§7.3) surfaces records that have drifted from the code instead of letting them rot unnoticed |
 | Transcript format changes | High | Defensive parsing (§7.1); hooks as an independent source |
 | `node-pty` install failures | High | Prebuilt multiarch; no Electron; 3-OS CI smoke test |
 | Scope: four subsystems in one project | High | Phased build order (§13); each phase independently useful |
@@ -538,6 +565,10 @@ Phases 4+ get their own plans once phase 3 has been used for real.
 
 ## 16. References
 
+- [Effective context engineering for AI agents (Anthropic)](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents) — file-based memory tool, structured note-taking, just-in-time retrieval by file path, "smallest set of high-signal tokens"
+- [Architecture Decision Records: lightweight docs that survive team turnover](https://blog.codercops.com/blog/architecture-decision-records-2026) — "Decision Documentation Theater"; why ADRs die, and why template choice is not the cause
+- [ADR templates and operational patterns for teams that actually maintain them](https://hidekazu-konishi.com/entry/architecture_decision_records_templates_and_operations.html)
+- [State of AI Agent Memory 2026 (Mem0)](https://mem0.ai/blog/state-of-ai-agent-memory-2026) · [Agent memory frameworks compared (Vectorize)](https://vectorize.io/articles/best-ai-agent-memory-systems) — Mem0 / Zep / Letta architectures, LoCoMo and LongMemEval scope
 - [Agent SDK overview](https://code.claude.com/docs/en/agent-sdk/overview) — third-party auth restriction, branding, SDK vs CLI
 - [A harness for every task: dynamic workflows in Claude Code](https://claude.com/blog/a-harness-for-every-task-dynamic-workflows-in-claude-code)
 - [SQLite driver benchmark](https://sqg.dev/blog/sqlite-driver-benchmark/) · [node:sqlite lacks FTS5](https://github.com/openclaw/openclaw/issues/3776)
