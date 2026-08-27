@@ -170,8 +170,24 @@ survive the tool being abandoned. Knowledge must outlive the tool that reads
 it.
 
 **Rule: SQLite is derived and disposable.** Delete the database, re-ingest from
-transcripts and markdown, and the state is identical. Nothing exists only in
-SQLite. This is enforced by the keystone test (§11).
+transcripts and markdown, and the state is identical. This is enforced by the
+keystone test (§11).
+
+Stated as one line with no exceptions:
+
+> **Anything the user authored is a file. Anything derivable lives in SQLite and
+> can be thrown away.**
+
+| Authored → file on disk | Derived → SQLite, disposable |
+|---|---|
+| Notes (§6.1) | Note index, FTS5 index |
+| Bounties (§8) | Sessions, activities (from transcript JSONL) |
+| Per-project config | Ingest cursors, evidence-check results |
+
+Bounties are files for exactly this reason: a local-only bounty with no GitHub
+issue behind it would otherwise exist *only* in SQLite, and deleting the
+database would silently lose work the user typed. One rule with no exceptions is
+worth a little extra file I/O.
 
 **UI updates over SSE**, not WebSocket — simpler, and one-directional is all
 that is needed for pushing state to the view.
@@ -393,9 +409,13 @@ new work is discovered mid-session.
 
 Deliberately thin.
 
+- **A bounty is a markdown file**, in the same store as notes (§4, §6.2), with
+  frontmatter: `id`, `project`, `title`, `status`, `difficulty`, `ext_ref`,
+  `created_at`, `closed_at`. SQLite only indexes it.
 - Optional `ext_ref` to a GitHub issue or PR. **If linked, `gh` is the source
   of truth** — no two-way sync.
-- Local-only bounties exist for work not worth an issue.
+- Local-only bounties exist for work not worth an issue. Because they are files,
+  they survive the database being deleted.
 - Status: `open → hunting → (blocked) → felled | abandoned`
 - One bounty spans many sessions. One session targets at most one bounty.
 
