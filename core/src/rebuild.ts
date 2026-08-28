@@ -49,7 +49,7 @@ export function snapshotState(db: Database.Database): string {
   const q = (sql: string) => db.prepare(sql).all()
   const state = {
     notes: q(
-      `SELECT id, project, title, kind, status, decided_on, confidence,
+      `SELECT id, project, path, title, kind, status, decided_on, confidence,
               review_after, hash
        FROM notes ORDER BY id`,
     ),

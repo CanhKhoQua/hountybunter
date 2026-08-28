@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
@@ -81,7 +81,7 @@ describe('rebuildFromDisk', () => {
     db.close()
   })
 
-  it('reports a note it cannot index without losing the others', async () => {
+  it('counts only notes actually indexed', async () => {
     await seedNote('n1', 'proj-a')
     await seedNote('n2', 'proj-a')
     // A note id long enough to be valid but whose evidence ref is absurd is not
@@ -90,5 +90,23 @@ describe('rebuildFromDisk', () => {
     const report = await rebuildFromDisk(env)
     expect(report.notesIndexed).toBe(2)
     expect(report.errors).toEqual([])
+  })
+
+  it('notices when a note file moved, even with identical frontmatter', async () => {
+    await seedNote('n1', 'proj-a')
+    await rebuildFromDisk(env)
+    const before = snapshotState(openDb(env))
+
+    // Same note, same frontmatter, different file location. Only `path` differs.
+    await mkdir(join(home, 'notes', 'proj-c'), { recursive: true })
+    await rename(
+      join(home, 'notes', 'proj-a', 'n1.md'),
+      join(home, 'notes', 'proj-c', 'n1.md'),
+    )
+
+    await rebuildFromDisk(env)
+    const after = snapshotState(openDb(env))
+
+    expect(after).not.toBe(before)
   })
 })
