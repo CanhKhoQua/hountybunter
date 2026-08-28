@@ -83,4 +83,19 @@ describe('parseNote', () => {
     const raw = '---\nquestion: q\nchosen: c\nrejected:\n  - option: Redis\n---\n\nbody\n'
     expect(parseNote(raw, '/store/g.md').rejected[0]).toEqual({ option: 'Redis', why_not: '' })
   })
+
+  it('reads an unquoted YAML date as the calendar day the author wrote', () => {
+    const note = parseNote(FULL, '/store/a.md')
+    expect(note.decided_on).toBe('2026-08-12')
+  })
+
+  it('reads a quoted YAML date identically', () => {
+    const raw = '---\nquestion: q\nchosen: c\ndecided_on: "2026-08-12"\n---\n\nbody\n'
+    expect(parseNote(raw, '/store/h.md').decided_on).toBe('2026-08-12')
+  })
+
+  it('reads review_after the same way', () => {
+    const raw = '---\nquestion: q\nchosen: c\nreview_after: 2027-02-01\n---\n\nbody\n'
+    expect(parseNote(raw, '/store/i.md').review_after).toBe('2027-02-01')
+  })
 })

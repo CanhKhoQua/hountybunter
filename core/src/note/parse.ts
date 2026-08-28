@@ -34,6 +34,19 @@ function str(value: unknown): string {
   return typeof value === 'string' ? value : value == null ? '' : String(value)
 }
 
+/**
+ * Frontmatter dates need care. YAML 1.1 parses an unquoted `2026-08-12` into a
+ * Date anchored at UTC midnight, and String(date) would render it in the
+ * machine's local zone — shifting the calendar day west of UTC. Take the UTC
+ * date components, which are exactly the day the file's author wrote.
+ */
+function dateStr(value: unknown): string {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? '' : value.toISOString().slice(0, 10)
+  }
+  return str(value)
+}
+
 function oneOf<T extends string>(
   value: unknown,
   allowed: readonly T[],
@@ -105,13 +118,13 @@ export function parseNote(raw: string, sourcePath: string): Note {
     project: str(data.project),
     kind: oneOf<NoteKind>(data.kind, NOTE_KINDS, 'kind', sourcePath, 'decision')!,
     status: oneOf<NoteStatus>(data.status, NOTE_STATUSES, 'status', sourcePath, 'standing')!,
-    decided_on: str(data.decided_on) || null,
+    decided_on: dateStr(data.decided_on) || null,
     question,
     chosen,
     rejected: parseRejected(data.rejected),
     evidence: parseEvidence(data.evidence),
     confidence: oneOf<Confidence>(data.confidence, CONFIDENCES, 'confidence', sourcePath, null),
-    review_after: str(data.review_after) || null,
+    review_after: dateStr(data.review_after) || null,
     supersedes: parseStringList(data.supersedes),
     body: parsed.content,
     extra,
