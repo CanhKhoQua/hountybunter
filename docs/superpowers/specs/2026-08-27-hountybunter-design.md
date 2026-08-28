@@ -309,14 +309,26 @@ Four schema decisions:
 
 ### 6.2 Where note files live
 
-Default: a central store, **`~/.hountybunter/notes/<project-slug>/*.md`**. This
-keeps the tool out of the user's repositories entirely, which is the safe
-default and the one that needs no permission.
+**Decided: a central store by default** —
+`~/.hountybunter/notes/<project-slug>/*.md`. The tool stays out of the user's
+repositories, which is the safe default and needs no permission.
 
 Opt-in per project: a configured in-repo path, e.g. `docs/decisions/`. Versioned
-with the code, visible in pull requests, and it travels when the repo is cloned
-— a real gain for a knowledge tool, but it is a write into someone's repository,
-so it is never the default and is never inferred.
+with the code, visible in pull requests, travels when the repo is cloned — a
+real gain, but it is a write into someone's repository, so it is never the
+default and is never inferred.
+
+These are genuinely different answers for different repositories, which is why
+it is configurable rather than fixed. A work repository is a poor home for a
+personal note explaining why its author distrusted an assumption; a public
+repository is an excellent home for the same note about its own architecture.
+
+**`project: global`** is reserved for decisions that span repositories — a
+timezone convention applied everywhere, a library ruled out for all projects.
+Published ADR experience is that records confined to one repository leave
+cross-cutting decisions to drift to wherever someone happened to put them. A
+central store with a `global` scope is the cheapest answer to that, and it is
+available only because the default is central.
 
 The read-only rule (§2, §10) is therefore precisely: **the tool never modifies
 source code and never commits.** It writes note files, to its own store by
@@ -554,12 +566,19 @@ Phases 4+ get their own plans once phase 3 has been used for real.
   claimed.
 - Whether `bounties` earns its place before phase 8, or whether GitHub Issues
   plus `ext_ref` is sufficient indefinitely.
-- Whether to import from the existing `~/.claude/projects/*/memory/` layout on
-  first run. Those files already hold real decisions and would seed the store
-  usefully, but their frontmatter is a different shape (`type:` rather than
-  `kind:`, no `rejected`, no `evidence`), so an import is lossy in one direction
-  and would need a mapping decision. §6.2 settles where notes are *written*;
-  this is only about seeding.
+- ~~Whether to bulk-import the existing `~/.claude/projects/*/memory/` files.~~
+  **Decided: no automated import.** Those ~30 files lack exactly the two fields
+  that carry the value — `rejected` and `evidence`. A bulk import would produce
+  thirty records that look complete and are hollow at the point that matters,
+  which teaches the reader that the tool is shallow — the abandonment failure in
+  §14, self-inflicted on day one. They are also live: Claude Code reads them
+  every session, and two diverging copies of one fact are worse than one copy.
+
+  Instead, five are rewritten by hand as seed data and test fixtures, chosen
+  because their reasoning is still recoverable: the offline-architecture
+  decision, the rejected graph tool, the debt-aging model change, the timezone
+  pinning rule, and the encoded-customer-id defect. Five real records beat
+  thirty hollow ones, and no import feature is built in phases 1-3.
 
 ---
 
