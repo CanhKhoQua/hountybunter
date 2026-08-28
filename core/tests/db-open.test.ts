@@ -2,7 +2,7 @@ import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { openDb, SCHEMA_VERSION } from '../src/db/open.js'
+import { openDb, SCHEMA_VERSION, SchemaVersionError } from '../src/db/open.js'
 
 let env: NodeJS.ProcessEnv
 
@@ -60,5 +60,13 @@ describe('openDb', () => {
     expect(db.prepare('SELECT note_id FROM notes_fts WHERE notes_fts MATCH ?').all('offline'))
       .toHaveLength(1)
     db.close()
+  })
+
+  it('refuses to open a database written by a different schema version', () => {
+    const db = openDb(env)
+    db.pragma('user_version = 99')
+    db.close()
+
+    expect(() => openDb(env)).toThrow(/schema version 99/)
   })
 })

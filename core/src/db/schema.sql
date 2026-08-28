@@ -1,3 +1,9 @@
+-- No FOREIGN KEY constraints are declared, deliberately. This index is rebuilt
+-- wholesale from markdown and transcripts rather than mutated in place, so
+-- referential integrity is a property of the rebuild, not of the database.
+-- `PRAGMA foreign_keys = ON` is set in open.ts so that any constraint added
+-- later is enforced from the start.
+
 CREATE TABLE IF NOT EXISTS projects (
   path          TEXT PRIMARY KEY,
   slug          TEXT NOT NULL,
