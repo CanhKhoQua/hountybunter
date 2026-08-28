@@ -56,7 +56,15 @@ export async function readAllNotes(
 
   for (const slug of projectDirs.sort()) {
     const dir = join(root, slug)
-    const files = (await readdir(dir)).filter((f) => f.endsWith('.md')).sort()
+    let files: string[]
+    try {
+      files = (await readdir(dir)).filter((f) => f.endsWith('.md')).sort()
+    } catch (error) {
+      // One unreadable project directory must not hide every other project's
+      // notes, for the same reason one unreadable file must not.
+      errors.push(new NoteParseError(`could not list project directory: ${String(error)}`, dir))
+      continue
+    }
     for (const file of files) {
       const path = join(dir, file)
       try {

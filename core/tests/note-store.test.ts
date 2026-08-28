@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
@@ -79,5 +79,22 @@ describe('writeNote / readAllNotes', () => {
     const { notes, errors } = await readAllNotes(env)
     expect(notes).toEqual([])
     expect(errors).toEqual([])
+  })
+
+  it('collects an error for an unreadable project directory without losing other projects', async () => {
+    await writeNote(parseNote(RAW, '/unused.md'), env)
+
+    const blocked = join(env.HOUNTYBUNTER_HOME!, 'notes', 'proj-blocked')
+    await mkdir(blocked, { recursive: true })
+    await chmod(blocked, 0o000)
+    try {
+      const { notes, errors } = await readAllNotes(env)
+      expect(notes).toHaveLength(1)
+      expect(notes[0]?.chosen).toBe('SQLite')
+      expect(errors).toHaveLength(1)
+      expect(errors[0]?.sourcePath).toContain('proj-blocked')
+    } finally {
+      await chmod(blocked, 0o755)
+    }
   })
 })
