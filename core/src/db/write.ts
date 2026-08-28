@@ -35,7 +35,11 @@ export function indexNote(db: Database.Database, note: Note): void {
 
     db.prepare('DELETE FROM note_evidence WHERE note_id = ?').run(note.id)
     const insertEvidence = db.prepare(
-      'INSERT INTO note_evidence (note_id, kind, ref) VALUES (?, ?, ?)',
+      // The primary key already declares (note_id, kind, ref) rows identical, so a
+      // note that cites the same file twice means one row, not an error. Without
+      // OR IGNORE the duplicate aborts the transaction and takes the whole rebuild
+      // with it.
+      'INSERT OR IGNORE INTO note_evidence (note_id, kind, ref) VALUES (?, ?, ?)',
     )
     for (const e of note.evidence) insertEvidence.run(note.id, e.kind, e.ref)
 

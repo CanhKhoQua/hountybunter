@@ -59,6 +59,28 @@ describe('indexNote', () => {
     db.close()
   })
 
+  it('collapses duplicate evidence rather than throwing', () => {
+    const db = openDb(env)
+    const raw = `---
+id: 2026-08-12-dupes
+title: Dupes
+project: proj-abc123
+question: q
+chosen: c
+evidence:
+  - kind: file
+    ref: src/same.ts
+  - kind: file
+    ref: src/same.ts
+---
+
+body
+`
+    expect(() => indexNote(db, parseNote(raw, '/store/d.md'))).not.toThrow()
+    expect(db.prepare('SELECT COUNT(*) c FROM note_evidence').get()).toEqual({ c: 1 })
+    db.close()
+  })
+
   it('clearNoteIndex empties note tables only', () => {
     const db = openDb(env)
     indexNote(db, parseNote(RAW, '/store/a.md'))

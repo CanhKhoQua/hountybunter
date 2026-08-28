@@ -22,6 +22,7 @@ beforeEach(async () => {
   indexNote(db, note('n1', 'proj-a', 'How do reps work offline?', 'TanStack Query'))
   indexNote(db, note('n2', 'proj-a', 'Which database?', 'SQLite', 'superseded'))
   indexNote(db, note('n3', 'proj-b', 'Which language for the CLI?', 'TypeScript'))
+  indexNote(db, note('n4', 'proj-c', 'Which operator?', 'C++ AND kept'))
 })
 
 describe('searchNotes', () => {
@@ -41,10 +42,17 @@ describe('searchNotes', () => {
     expect(searchNotes(db, 'kubernetes')).toEqual([])
   })
 
-  it('treats FTS operators in user input as literal text', () => {
-    expect(() => searchNotes(db, 'a AND')).not.toThrow()
-    expect(() => searchNotes(db, 'C++')).not.toThrow()
-    expect(() => searchNotes(db, '"')).not.toThrow()
+  it('treats FTS operators in user input as literal text, and still matches', () => {
+    // Operator-shaped input must not throw and must not be parsed as operators.
+    for (const q of ['a AND b', 'C++', '"', 'NEAR(a b)', '*', '', 'x'.repeat(500)]) {
+      expect(() => searchNotes(db, q)).not.toThrow()
+    }
+
+    // And a literal search for operator-shaped text must actually find it —
+    // the check the previous version of this test could not make.
+    expect(searchNotes(db, 'C++').map((h) => h.id)).toContain('n4')
+    expect(searchNotes(db, 'C++ AND kept').map((h) => h.id)).toContain('n4')
+    expect(searchNotes(db, 'NEAR(a b)')).toEqual([])
   })
 
   it('returns a snippet containing the match', () => {
@@ -54,7 +62,7 @@ describe('searchNotes', () => {
 
 describe('listNotes', () => {
   it('lists every note by default, newest id first', () => {
-    expect(listNotes(db).map((h) => h.id)).toEqual(['n3', 'n2', 'n1'])
+    expect(listNotes(db).map((h) => h.id)).toEqual(['n4', 'n3', 'n2', 'n1'])
   })
 
   it('filters by project', () => {
