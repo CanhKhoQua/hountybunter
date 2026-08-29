@@ -36,14 +36,25 @@ export async function appendJot(
   await mkdir(dir, { recursive: true })
   const file = join(dir, `${date}.md`)
 
-  let line = 1
+  let existing = ''
   try {
-    line = (await readFile(file, 'utf8')).split('\n').filter(Boolean).length + 1
+    existing = await readFile(file, 'utf8')
   } catch {
-    line = 1
+    existing = ''
   }
+  const line = existing.split('\n').filter(Boolean).length + 1
 
-  await appendFile(file, `${instant}${SEPARATOR}${input.project}${SEPARATOR}${text}\n`, 'utf8')
+  // A jot file is plain markdown and may be hand-edited, so it can arrive without
+  // its trailing newline. Appending straight onto that line would merge two jots
+  // into one that still parses as three fields — corruption that readJots cannot
+  // detect, because the result is not malformed.
+  const separator = existing.length > 0 && !existing.endsWith('\n') ? '\n' : ''
+
+  await appendFile(
+    file,
+    `${separator}${instant}${SEPARATOR}${input.project}${SEPARATOR}${text}\n`,
+    'utf8',
+  )
   return { instant, project: input.project, text, line, date }
 }
 

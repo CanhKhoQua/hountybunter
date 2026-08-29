@@ -54,6 +54,24 @@ describe('appendJot', () => {
     await expect(appendJot({ project: 'proj-a', text: '   ' }, { env, timeZone: 'UTC' }))
       .rejects.toThrow(/empty/i)
   })
+
+  it('does not merge onto a hand-edited file that lost its trailing newline', async () => {
+    await mkdir(join(home, 'jots'), { recursive: true })
+    await writeFile(
+      join(home, 'jots', '2026-08-27.md'),
+      '2026-08-27T09:00:00.000Z | p | hand written, no trailing newline',
+    )
+
+    await appendJot(
+      { project: 'p', text: 'appended after' },
+      { env, clock: clock('2026-08-27T10:00:00.000Z'), timeZone: 'UTC' },
+    )
+
+    const jots = await readJots({ env })
+    expect(jots).toHaveLength(2)
+    expect(jots[0]?.text).toBe('hand written, no trailing newline')
+    expect(jots[1]?.text).toBe('appended after')
+  })
 })
 
 describe('readJots', () => {
