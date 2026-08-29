@@ -2,6 +2,7 @@
   "files": [],
   "references": [
     { "path": "./core" },
-    { "path": "./adapters/claude-code" }
+    { "path": "./adapters/claude-code" },
+    { "path": "./surfaces/cli" }
   ]
 }

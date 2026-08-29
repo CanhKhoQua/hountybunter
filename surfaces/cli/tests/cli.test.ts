@@ -1,0 +1,111 @@
+import { mkdtemp } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { beforeEach, describe, expect, it } from 'vitest'
+import { runCli, type Io } from '../src/bin.js'
+
+let out: string[]
+let err: string[]
+let io: Io
+
+beforeEach(async () => {
+  const home = await mkdtemp(join(tmpdir(), 'hb-'))
+  out = []
+  err = []
+  io = {
+    out: (l) => out.push(l),
+    err: (l) => err.push(l),
+    env: { HOUNTYBUNTER_HOME: home, HOUNTYBUNTER_TZ: 'UTC' } as NodeJS.ProcessEnv,
+    cwd: '/Users/x/myproject',
+  }
+})
+
+describe('hb jot', () => {
+  it('captures a line and reports where it went', async () => {
+    expect(await runCli(['jot', 'chose', 'SQLite', 'over', 'Postgres'], io)).toBe(0)
+    expect(out.join('\n')).toMatch(/jotted/i)
+  })
+
+  it('fails with a message when given no text', async () => {
+    expect(await runCli(['jot'], io)).toBe(1)
+    expect(err.join('\n')).toMatch(/text/i)
+  })
+})
+
+describe('hb promote', () => {
+  it('turns jot 1 into a note', async () => {
+    await runCli(['jot', 'chose', 'SQLite'], io)
+    expect(await runCli(['promote', '1', '--question', 'Which database?', '--chosen', 'SQLite'], io))
+      .toBe(0)
+    expect(out.join('\n')).toMatch(/which-database/)
+  })
+
+  it('rejects a jot number that does not exist', async () => {
+    expect(await runCli(['promote', '9', '--question', 'q', '--chosen', 'c'], io)).toBe(1)
+    expect(err.join('\n')).toMatch(/no jot/i)
+  })
+
+  it('requires --question and --chosen', async () => {
+    await runCli(['jot', 'anything'], io)
+    expect(await runCli(['promote', '1', '--question', 'q'], io)).toBe(1)
+    expect(err.join('\n')).toMatch(/chosen/)
+  })
+})
+
+describe('hb search and list', () => {
+  it('finds a promoted note', async () => {
+    await runCli(['jot', 'chose SQLite because it is a file'], io)
+    await runCli(['promote', '1', '--question', 'Which database?', '--chosen', 'SQLite'], io)
+    await runCli(['rebuild'], io)
+
+    out.length = 0
+    expect(await runCli(['search', 'database'], io)).toBe(0)
+    expect(out.join('\n')).toMatch(/Which database\?/)
+  })
+
+  it('says so plainly when nothing matches', async () => {
+    await runCli(['rebuild'], io)
+    out.length = 0
+    expect(await runCli(['search', 'kubernetes'], io)).toBe(0)
+    expect(out.join('\n')).toMatch(/no matches/i)
+  })
+
+  it('lists notes', async () => {
+    await runCli(['jot', 'anything'], io)
+    await runCli(['promote', '1', '--question', 'Which cache?', '--chosen', 'Redis'], io)
+    await runCli(['rebuild'], io)
+
+    out.length = 0
+    expect(await runCli(['list'], io)).toBe(0)
+    expect(out.join('\n')).toMatch(/Which cache\?/)
+  })
+})
+
+describe('hb rebuild', () => {
+  it('reports how many notes were indexed', async () => {
+    await runCli(['jot', 'anything'], io)
+    await runCli(['promote', '1', '--question', 'q', '--chosen', 'c'], io)
+    out.length = 0
+    expect(await runCli(['rebuild'], io)).toBe(0)
+    expect(out.join('\n')).toMatch(/1 note/)
+  })
+
+  it('--verify confirms a second rebuild is identical', async () => {
+    await runCli(['jot', 'anything'], io)
+    await runCli(['promote', '1', '--question', 'q', '--chosen', 'c'], io)
+    out.length = 0
+    expect(await runCli(['rebuild', '--verify'], io)).toBe(0)
+    expect(out.join('\n')).toMatch(/identical/i)
+  })
+})
+
+describe('dispatch', () => {
+  it('prints usage and exits non-zero for an unknown command', async () => {
+    expect(await runCli(['fly'], io)).toBe(1)
+    expect(err.join('\n')).toMatch(/usage/i)
+  })
+
+  it('prints usage for no arguments', async () => {
+    expect(await runCli([], io)).toBe(1)
+  })
+})
