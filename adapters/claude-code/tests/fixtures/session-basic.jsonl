@@ -1,0 +1,4 @@
+{"type":"user","cwd":"/Users/x/proj","gitBranch":"main","timestamp":"2026-08-27T10:00:00.000Z"}
+{"type":"assistant","cwd":"/Users/x/proj","gitBranch":"main","effort":"high","aiTitle":"Fix the parser","timestamp":"2026-08-27T10:00:05.000Z","message":{"content":[{"type":"tool_use","name":"Bash"}]}}
+{"type":"assistant","cwd":"/Users/x/proj","attributionSkill":"superpowers:brainstorming","timestamp":"2026-08-27T10:00:09.000Z","message":{"content":[{"type":"tool_use","name":"Write"}]}}
+{"type":"system","cwd":"/Users/x/proj","timestamp":"2026-08-27T10:00:12.000Z"}
