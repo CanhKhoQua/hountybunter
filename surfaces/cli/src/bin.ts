@@ -28,18 +28,35 @@ const USAGE = `usage: hb <command>
   ingest                              read new Claude Code transcript lines
   rebuild [--verify]                  rebuild the index from disk`
 
+/** Parse a numeric CLI option, or explain precisely what was wrong with it. */
+function positiveInt(value: string | undefined, flag: string): number | undefined {
+  if (value === undefined) return undefined
+  const n = Number(value)
+  if (!Number.isInteger(n) || n < 1) {
+    throw new Error(`${flag} must be a positive whole number — got "${value}"`)
+  }
+  return n
+}
+
 export async function runCli(argv: string[], io: Io): Promise<number> {
   const [command, ...rest] = argv
-  switch (command) {
-    case 'jot': return cmdJot(rest, io)
-    case 'promote': return cmdPromote(rest, io)
-    case 'search': return cmdSearch(rest, io)
-    case 'list': return cmdList(rest, io)
-    case 'ingest': return cmdIngest(io)
-    case 'rebuild': return cmdRebuild(rest, io)
-    default:
-      io.err(USAGE)
-      return 1
+  try {
+    switch (command) {
+      case 'jot': return await cmdJot(rest, io)
+      case 'promote': return await cmdPromote(rest, io)
+      case 'search': return await cmdSearch(rest, io)
+      case 'list': return await cmdList(rest, io)
+      case 'ingest': return await cmdIngest(io)
+      case 'rebuild': return await cmdRebuild(rest, io)
+      default:
+        io.err(USAGE)
+        return 1
+    }
+  } catch (error) {
+    // parseArgs throws on a malformed flag, and a bad value can surface far later
+    // as a driver error. Someone typing `hb promote -1` should get a sentence.
+    io.err(`hb${command ? ` ${command}` : ''}: ${(error as Error).message}`)
+    return 1
   }
 }
 
@@ -81,10 +98,15 @@ async function cmdPromote(args: string[], io: Io): Promise<number> {
     return 1
   }
 
+  const index = positiveInt(positionals[0], '<n>')
+  if (index === undefined) {
+    io.err('hb promote: needs a jot number — see `hb promote --help` for what n means')
+    return 1
+  }
   const jots = await readJots({ env: io.env })
-  const jot = jots[Number(positionals[0]) - 1]
+  const jot = jots[index - 1]
   if (!jot) {
-    io.err(`hb promote: no jot #${positionals[0] ?? ''}`)
+    io.err(`hb promote: no jot #${index}`)
     return 1
   }
 
@@ -113,7 +135,7 @@ async function cmdSearch(args: string[], io: Io): Promise<number> {
   try {
     const hits = searchNotes(db, query, {
       project: values.project,
-      limit: values.limit ? Number(values.limit) : undefined,
+      limit: positiveInt(values.limit, '--limit'),
     })
     if (hits.length === 0) {
       io.out('no matches')
@@ -144,7 +166,7 @@ async function cmdList(args: string[], io: Io): Promise<number> {
     const hits = listNotes(db, {
       project: values.project,
       status: values.status,
-      limit: values.limit ? Number(values.limit) : undefined,
+      limit: positiveInt(values.limit, '--limit'),
     })
     if (hits.length === 0) {
       io.out('no notes yet')

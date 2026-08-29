@@ -109,3 +109,23 @@ describe('dispatch', () => {
     expect(await runCli([], io)).toBe(1)
   })
 })
+
+describe('hostile input', () => {
+  const cases: [string, string[]][] = [
+    ['negative jot number', ['promote', '-1', '--question', 'q', '--chosen', 'c']],
+    ['non-numeric jot number', ['promote', 'abc', '--question', 'q', '--chosen', 'c']],
+    ['zero jot number', ['promote', '0', '--question', 'q', '--chosen', 'c']],
+    ['missing jot number', ['promote', '--question', 'q', '--chosen', 'c']],
+    ['non-numeric limit', ['search', 'anything', '--limit', 'abc']],
+    ['negative limit', ['list', '--limit', '-5']],
+  ]
+
+  for (const [name, argv] of cases) {
+    it(`reports ${name} without crashing`, async () => {
+      expect(await runCli(argv, io)).toBe(1)
+      const message = err.join('\n')
+      expect(message).not.toMatch(/at .*\(.*:\d+:\d+\)/)   // no stack frames
+      expect(message.length).toBeGreaterThan(0)
+    })
+  }
+})
