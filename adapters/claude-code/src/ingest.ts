@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3'
 import { projectSlug } from '@hountybunter/core'
-import { readNewLines } from './cursor.js'
+import { readNewLines, saveCursor } from './cursor.js'
 import { findTranscripts } from './locate.js'
 import { extractToolUses, parseLine } from './parse-line.js'
 
@@ -36,9 +36,9 @@ export async function ingestAll(
 
   const upsertSession = db.prepare(
     `INSERT INTO sessions (id, project, started_at, ended_at, branch, model, effort, title, correlation)
-     VALUES (@id, @project, @started_at, @ended_at, @branch, @model, @effort, @title, 'exact')
+     VALUES (@id, @project_for_insert, @started_at, @ended_at, @branch, @model, @effort, @title, 'exact')
      ON CONFLICT(id) DO UPDATE SET
-       project    = COALESCE(excluded.project, sessions.project),
+       project    = COALESCE(@project_observed, sessions.project),
        started_at = COALESCE(sessions.started_at, excluded.started_at),
        ended_at   = COALESCE(excluded.ended_at, sessions.ended_at),
        branch     = COALESCE(excluded.branch, sessions.branch),
@@ -56,7 +56,7 @@ export async function ingestAll(
   const maxSeq = db.prepare('SELECT COALESCE(MAX(seq), 0) AS m FROM activities WHERE session_id = ?')
 
   for (const file of await findTranscripts(env)) {
-    const { lines } = await readNewLines(db, file.path, nowIso)
+    const { lines, to } = await readNewLines(db, file.path)
     if (lines.length === 0) continue
 
     let seq = (maxSeq.get(file.sessionId) as { m: number }).m
@@ -117,7 +117,8 @@ export async function ingestAll(
 
       upsertSession.run({
         id: file.sessionId,
-        project: project ?? projectSlug(file.projectDir),
+        project_for_insert: project ?? projectSlug(file.projectDir),
+        project_observed: project,
         started_at: startedAt,
         ended_at: endedAt,
         branch,
@@ -125,6 +126,10 @@ export async function ingestAll(
         effort,
         title,
       })
+
+      // Last, and inside the transaction: the cursor may only advance if the rows
+      // it produced are committed with it.
+      saveCursor(db, file.path, to, nowIso)
     })()
 
     report.sessions += 1

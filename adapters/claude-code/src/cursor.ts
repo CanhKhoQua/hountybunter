@@ -11,11 +11,13 @@ export interface ReadResult {
  * Read the bytes appended since the last call. A trailing line without a
  * newline is left unconsumed so a half-written record is never parsed; the
  * cursor advances only past complete lines.
+ *
+ * This does NOT persist the new offset — call `saveCursor` with the `to` it
+ * returns once the rows derived from these lines are safely committed.
  */
 export async function readNewLines(
   db: Database.Database,
   path: string,
-  nowIso: string,
 ): Promise<ReadResult> {
   let size: number
   try {
@@ -48,12 +50,25 @@ export async function readNewLines(
   const consumed = lastNewline === -1 ? 0 : Buffer.byteLength(complete, 'utf8') + 1
   const to = from + consumed
 
+  return { lines: complete.split('\n').filter((l) => l.length > 0), from, to }
+}
+
+/**
+ * Persist a cursor advance. Deliberately separate from readNewLines and
+ * synchronous, so a caller can run it inside the same db.transaction() as the
+ * rows it derived from. If the cursor advanced on its own and the rows then
+ * rolled back, those lines would be skipped forever with nothing reported.
+ */
+export function saveCursor(
+  db: Database.Database,
+  path: string,
+  byteOffset: number,
+  nowIso: string,
+): void {
   db.prepare(
     `INSERT INTO ingest_cursors (file_path, byte_offset, last_seen_at)
      VALUES (?, ?, ?)
      ON CONFLICT(file_path) DO UPDATE SET
        byte_offset = excluded.byte_offset, last_seen_at = excluded.last_seen_at`,
-  ).run(path, to, nowIso)
-
-  return { lines: complete.split('\n').filter((l) => l.length > 0), from, to }
+  ).run(path, byteOffset, nowIso)
 }

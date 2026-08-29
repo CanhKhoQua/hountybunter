@@ -1,4 +1,4 @@
-import { cp, mkdir, mkdtemp } from 'node:fs/promises'
+import { appendFile, cp, mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -92,5 +92,63 @@ describe('ingestAll', () => {
   it('handles an empty transcript root', async () => {
     expect(await ingestAll(db, env, NOW))
       .toEqual({ sessions: 0, activities: 0, skippedLines: 0, unknownKinds: {} })
+  })
+
+  it('never advances the cursor unless the rows it derived from are committed', async () => {
+    const dir = join(env.HOUNTYBUNTER_TRANSCRIPTS!, '-Users-x-proj')
+    await mkdir(dir, { recursive: true })
+    const filePath = join(dir, 'cccc-3333.jsonl')
+    const lines = [
+      '{"type":"user","cwd":"/Users/x/proj","timestamp":"2026-08-27T13:00:00.000Z"}',
+      '{"type":"force-fail-marker","cwd":"/Users/x/proj","timestamp":"2026-08-27T13:00:01.000Z"}',
+    ]
+    await writeFile(filePath, `${lines.join('\n')}\n`)
+
+    // Force a real, non-mocked failure mid-transaction: a genuine SQLite
+    // trigger that aborts the insert as soon as this specific record type
+    // reaches the activities table.
+    db.exec(`
+      CREATE TRIGGER force_fail
+      BEFORE INSERT ON activities
+      WHEN NEW.kind = 'force-fail-marker'
+      BEGIN
+        SELECT RAISE(ABORT, 'forced failure for test');
+      END;
+    `)
+
+    await expect(ingestAll(db, env, NOW)).rejects.toThrow(/forced failure for test/)
+
+    // Nothing committed: no session, no activities, and the cursor never advanced.
+    expect(db.prepare('SELECT COUNT(*) c FROM sessions').get()).toEqual({ c: 0 })
+    expect(db.prepare('SELECT COUNT(*) c FROM activities').get()).toEqual({ c: 0 })
+    expect(db.prepare('SELECT byte_offset FROM ingest_cursors WHERE file_path = ?').get(filePath))
+      .toBeUndefined()
+
+    db.exec('DROP TRIGGER force_fail')
+
+    // With the failure gone, a re-run recovers both lines — nothing was lost.
+    const report = await ingestAll(db, env, NOW)
+    expect(report.sessions).toBe(1)
+    expect(report.activities).toBe(2)
+    expect(db.prepare('SELECT COUNT(*) c FROM activities').get()).toEqual({ c: 2 })
+  })
+
+  it('does not let a later cwd-less append overwrite a stored project', async () => {
+    await stage('session-basic.jsonl', 'aaaa-1111')
+    await ingestAll(db, env, NOW)
+
+    const before = db.prepare('SELECT project FROM sessions WHERE id = ?').get('aaaa-1111') as {
+      project: string
+    }
+
+    const filePath = join(env.HOUNTYBUNTER_TRANSCRIPTS!, '-Users-x-proj', 'aaaa-1111.jsonl')
+    await appendFile(filePath, '{"type":"mode","timestamp":"2026-08-27T10:00:20.000Z"}\n')
+
+    await ingestAll(db, env, NOW)
+
+    const after = db.prepare('SELECT project FROM sessions WHERE id = ?').get('aaaa-1111') as {
+      project: string
+    }
+    expect(after.project).toBe(before.project)
   })
 })
