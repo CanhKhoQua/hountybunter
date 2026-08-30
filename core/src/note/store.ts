@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { notesDir, storeRoot } from '../paths.js'
@@ -16,7 +17,16 @@ export function slugifyTitle(title: string): string {
 }
 
 export function makeNoteId(title: string, dateIso: string, timeZone: string): string {
-  return `${calendarDate(dateIso, timeZone)}-${slugifyTitle(title)}`
+  const date = calendarDate(dateIso, timeZone)
+  const slug = slugifyTitle(title)
+  // A title in a non-Latin script slugifies to nothing, and two titles sharing
+  // their first 60 characters slugify identically — either way the second note
+  // would overwrite the first without a word. A short hash of the full title keeps
+  // the id distinctive in both cases and leaves ordinary titles untouched.
+  const needsSuffix = slug === '' || title.length > 60
+  if (!needsSuffix) return `${date}-${slug}`
+  const digest = createHash('sha256').update(title).digest('hex').slice(0, 8)
+  return slug === '' ? `${date}-${digest}` : `${date}-${slug}-${digest}`
 }
 
 export async function writeNote(

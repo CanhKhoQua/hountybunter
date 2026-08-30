@@ -41,6 +41,27 @@ describe('makeNoteId', () => {
     expect(makeNoteId('Pick a DB', '2026-08-27T03:30:00.000Z', 'America/New_York'))
       .toBe('2026-08-26-pick-a-db')
   })
+
+  it('falls back to a hash when the title slugifies to nothing', () => {
+    const id = makeNoteId('缓存策略', '2026-08-27T03:30:00.000Z', 'UTC')
+    expect(id).toMatch(/^2026-08-27-[0-9a-f]{8}$/)
+  })
+
+  it('gives different non-Latin titles different ids on the same day', () => {
+    const a = makeNoteId('缓存策略', '2026-08-27T03:30:00.000Z', 'UTC')
+    const b = makeNoteId('另一个标题', '2026-08-27T03:30:00.000Z', 'UTC')
+    expect(a).not.toBe(b)
+  })
+
+  it('gives titles sharing a 60-character prefix different ids', () => {
+    const a = makeNoteId(`${'a'.repeat(60)}X`, '2026-08-27T03:30:00.000Z', 'UTC')
+    const b = makeNoteId(`${'a'.repeat(60)}Y`, '2026-08-27T03:30:00.000Z', 'UTC')
+    expect(a).not.toBe(b)
+  })
+
+  it('leaves an ordinary short title unaffected', () => {
+    expect(makeNoteId('Pick a DB', '2026-08-27T03:30:00.000Z', 'UTC')).toBe('2026-08-27-pick-a-db')
+  })
 })
 
 describe('writeNote / readAllNotes', () => {
