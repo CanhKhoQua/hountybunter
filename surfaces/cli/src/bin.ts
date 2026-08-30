@@ -23,6 +23,7 @@ export interface Io {
 const USAGE = `usage: hb <command>
 
   jot <text...>                       capture one line for the current project
+  jots [--limit N]                    list captured jots with their promote positions
   promote <n> --question Q --chosen C [--title T]   n = position in the full list, oldest first
   search <query> [--project P] [--limit N]
   list [--project P] [--status S] [--limit N]
@@ -44,6 +45,7 @@ export async function runCli(argv: string[], io: Io): Promise<number> {
   try {
     switch (command) {
       case 'jot': return await cmdJot(rest, io)
+      case 'jots': return await cmdJots(rest, io)
       case 'promote': return await cmdPromote(rest, io)
       case 'search': return await cmdSearch(rest, io)
       case 'list': return await cmdList(rest, io)
@@ -128,6 +130,24 @@ async function cmdPromote(args: string[], io: Io): Promise<number> {
   }
 
   io.out(`wrote ${note.id}`)
+  return 0
+}
+
+async function cmdJots(args: string[], io: Io): Promise<number> {
+  const { values } = parseArgs({ args, options: { limit: { type: 'string' } } })
+  const limit = positiveInt(values.limit, '--limit') ?? 20
+
+  const jots = await readJots({ env: io.env })
+  if (jots.length === 0) {
+    io.out('no jots yet')
+    return 0
+  }
+
+  const start = Math.max(0, jots.length - limit)
+  for (let i = start; i < jots.length; i++) {
+    const jot = jots[i]!
+    io.out(`${i + 1}  ${jot.date}  ${jot.project}  ${jot.text}`)
+  }
   return 0
 }
 

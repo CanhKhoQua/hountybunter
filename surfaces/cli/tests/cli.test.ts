@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
+import { appendJot } from '@hountybunter/core'
 import { runCli, type Io } from '../src/bin.js'
 
 let out: string[]
@@ -108,6 +109,45 @@ describe('hb rebuild', () => {
     expect(await runCli(['rebuild'], io)).toBe(1)
     expect(out.join('\n')).toMatch(/1 note/)
     expect(err.join('\n').length).toBeGreaterThan(0)
+  })
+})
+
+describe('hb jots', () => {
+  it('says so plainly when there are none', async () => {
+    expect(await runCli(['jots'], io)).toBe(0)
+    expect(out.join('\n')).toMatch(/no jots/i)
+  })
+
+  it('numbers jots as a flat index across days, oldest first', async () => {
+    const clock = (iso: string) => () => new Date(iso)
+    await appendJot({ project: 'p', text: 'day one, first' },
+      { env: io.env, timeZone: 'UTC', clock: clock('2026-08-20T10:00:00.000Z') })
+    await appendJot({ project: 'p', text: 'day one, second' },
+      { env: io.env, timeZone: 'UTC', clock: clock('2026-08-20T11:00:00.000Z') })
+    await appendJot({ project: 'p', text: 'day two, first' },
+      { env: io.env, timeZone: 'UTC', clock: clock('2026-08-21T10:00:00.000Z') })
+
+    expect(await runCli(['jots'], io)).toBe(0)
+    const lines = out.join('\n').split('\n')
+    expect(lines[0]).toMatch(/^1\s+2026-08-20.*day one, first/)
+    expect(lines[1]).toMatch(/^2\s+2026-08-20.*day one, second/)
+    expect(lines[2]).toMatch(/^3\s+2026-08-21.*day two, first/)
+  })
+
+  it('--limit caps how many are shown, keeping the newest', async () => {
+    const clock = (iso: string) => () => new Date(iso)
+    await appendJot({ project: 'p', text: 'one' },
+      { env: io.env, timeZone: 'UTC', clock: clock('2026-08-20T10:00:00.000Z') })
+    await appendJot({ project: 'p', text: 'two' },
+      { env: io.env, timeZone: 'UTC', clock: clock('2026-08-21T10:00:00.000Z') })
+    await appendJot({ project: 'p', text: 'three' },
+      { env: io.env, timeZone: 'UTC', clock: clock('2026-08-22T10:00:00.000Z') })
+
+    expect(await runCli(['jots', '--limit', '2'], io)).toBe(0)
+    const lines = out.join('\n').split('\n')
+    expect(lines).toHaveLength(2)
+    expect(lines[0]).toMatch(/^2\s+.*two/)
+    expect(lines[1]).toMatch(/^3\s+.*three/)
   })
 })
 
