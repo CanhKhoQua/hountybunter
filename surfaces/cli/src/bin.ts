@@ -225,5 +225,5 @@ async function cmdRebuild(args: string[], io: Io): Promise<number> {
     }
     io.out('verified: a second rebuild produced identical state')
   }
-  return 0
+  return report.errors.length > 0 ? 1 : 0
 }

@@ -1,4 +1,4 @@
-import { mkdtemp } from 'node:fs/promises'
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
@@ -7,9 +7,10 @@ import { runCli, type Io } from '../src/bin.js'
 let out: string[]
 let err: string[]
 let io: Io
+let home: string
 
 beforeEach(async () => {
-  const home = await mkdtemp(join(tmpdir(), 'hb-'))
+  home = await mkdtemp(join(tmpdir(), 'hb-'))
   out = []
   err = []
   io = {
@@ -92,6 +93,21 @@ describe('hb rebuild', () => {
     out.length = 0
     expect(await runCli(['rebuild', '--verify'], io)).toBe(0)
     expect(out.join('\n')).toMatch(/identical/i)
+  })
+
+  it('exits 1 when a note fails to index, but still indexes the good one', async () => {
+    await runCli(['jot', 'good one'], io)
+    await runCli(['promote', '1', '--question', 'q', '--chosen', 'c'], io)
+
+    const brokenDir = join(home, 'notes', 'broken-proj')
+    await mkdir(brokenDir, { recursive: true })
+    await writeFile(join(brokenDir, 'bad.md'), '---\nchosen: only\n---\n\nx\n')
+
+    out.length = 0
+    err.length = 0
+    expect(await runCli(['rebuild'], io)).toBe(1)
+    expect(out.join('\n')).toMatch(/1 note/)
+    expect(err.join('\n').length).toBeGreaterThan(0)
   })
 })
 
