@@ -80,10 +80,14 @@ export async function ingestAll(
         const raw = record.raw
         const cwd = str(raw.cwd)
         if (cwd && !project) project = projectSlug(cwd)
-        branch ??= str(raw.gitBranch)
-        model ??= str(raw.model)
-        effort ??= str(raw.effort)
-        title ??= str(raw.aiTitle)
+        // Last-wins, matching the upsert's COALESCE(excluded.x, sessions.x). Keeping
+        // the first value seen in a run would make incremental ingest converge on the
+        // newest and a full re-scan on the oldest, so the index would stop being
+        // re-derivable — the design's central claim.
+        branch = str(raw.gitBranch) ?? branch
+        model = str(raw.model) ?? model
+        effort = str(raw.effort) ?? effort
+        title = str(raw.aiTitle) ?? title
 
         const ts = str(raw.timestamp)
         if (ts) {

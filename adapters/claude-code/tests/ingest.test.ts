@@ -1,9 +1,9 @@
-import { appendFile, cp, mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { appendFile, cp, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { openDb } from '@hountybunter/core'
+import { dbPath, openDb, snapshotState } from '@hountybunter/core'
 import { ingestAll } from '../src/ingest.js'
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), 'fixtures')
@@ -150,5 +150,32 @@ describe('ingestAll', () => {
       project: string
     }
     expect(after.project).toBe(before.project)
+  })
+
+  it('agrees with a full re-scan on which session field values win (keystone: SQLite is disposable)', async () => {
+    await stage('session-basic.jsonl', 'aaaa-1111')
+    await ingestAll(db, env, NOW)
+
+    // Incremental path: append a record with DIFFERENT branch/model/title and
+    // ingest again.
+    const filePath = join(env.HOUNTYBUNTER_TRANSCRIPTS!, '-Users-x-proj', 'aaaa-1111.jsonl')
+    await appendFile(
+      filePath,
+      '{"type":"assistant","cwd":"/Users/x/proj","gitBranch":"feature","model":"claude-opus","aiTitle":"Second title","timestamp":"2026-08-27T10:00:20.000Z"}\n',
+    )
+    await ingestAll(db, env, NOW)
+
+    const incremental = snapshotState(openDb(env))
+
+    await rm(dbPath(env), { force: true })
+    await rm(`${dbPath(env)}-wal`, { force: true })
+    await rm(`${dbPath(env)}-shm`, { force: true })
+
+    // Full-rescan path: ingest once from scratch, into a fresh database.
+    const freshDb = openDb(env)
+    await ingestAll(freshDb, env, NOW)
+    const fullRescan = snapshotState(freshDb)
+
+    expect(fullRescan).toBe(incremental)
   })
 })
