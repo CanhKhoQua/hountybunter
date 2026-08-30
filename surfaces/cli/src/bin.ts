@@ -1,6 +1,7 @@
 import { parseArgs } from 'node:util'
 import {
   appendJot,
+  indexNote,
   listNotes,
   openDb,
   projectSlug,
@@ -115,6 +116,17 @@ async function cmdPromote(args: string[], io: Io): Promise<number> {
     { question: values.question, chosen: values.chosen, title: values.title },
     { env: io.env, timeZone: io.env.HOUNTYBUNTER_TZ },
   )
+
+  // Index it now. The store is the source of truth and the index is derived, so
+  // writing one without the other leaves `hb search` unable to find a note that
+  // demonstrably exists — which is exactly what the README's own sequence did.
+  const db = openDb(io.env)
+  try {
+    indexNote(db, note)
+  } finally {
+    db.close()
+  }
+
   io.out(`wrote ${note.id}`)
   return 0
 }

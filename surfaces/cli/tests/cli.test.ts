@@ -56,7 +56,6 @@ describe('hb search and list', () => {
   it('finds a promoted note', async () => {
     await runCli(['jot', 'chose SQLite because it is a file'], io)
     await runCli(['promote', '1', '--question', 'Which database?', '--chosen', 'SQLite'], io)
-    await runCli(['rebuild'], io)
 
     out.length = 0
     expect(await runCli(['search', 'database'], io)).toBe(0)
@@ -64,8 +63,6 @@ describe('hb search and list', () => {
   })
 
   it('says so plainly when nothing matches', async () => {
-    await runCli(['rebuild'], io)
-    out.length = 0
     expect(await runCli(['search', 'kubernetes'], io)).toBe(0)
     expect(out.join('\n')).toMatch(/no matches/i)
   })
@@ -73,7 +70,6 @@ describe('hb search and list', () => {
   it('lists notes', async () => {
     await runCli(['jot', 'anything'], io)
     await runCli(['promote', '1', '--question', 'Which cache?', '--chosen', 'Redis'], io)
-    await runCli(['rebuild'], io)
 
     out.length = 0
     expect(await runCli(['list'], io)).toBe(0)
