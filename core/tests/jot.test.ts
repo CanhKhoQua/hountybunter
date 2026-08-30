@@ -86,7 +86,6 @@ describe('readJots', () => {
       { env, clock: clock('2026-08-27T10:00:00.000Z'), timeZone: 'UTC' })
     const jots = await readJots({ env })
     expect(jots.map((j) => j.text)).toEqual(['day one', 'day two'])
-    expect(jots[0]?.line).toBe(1)
   })
 
   it('skips a malformed line instead of failing the read', async () => {

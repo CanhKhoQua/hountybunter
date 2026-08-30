@@ -7,8 +7,6 @@ export interface Jot {
   instant: string
   project: string
   text: string
-  /** 1-based line number within its day file, for later promotion. */
-  line: number
   date: string
 }
 
@@ -42,7 +40,6 @@ export async function appendJot(
   } catch {
     existing = ''
   }
-  const line = existing.split('\n').filter(Boolean).length + 1
 
   // A jot file is plain markdown and may be hand-edited, so it can arrive without
   // its trailing newline. Appending straight onto that line would merge two jots
@@ -55,7 +52,7 @@ export async function appendJot(
     `${separator}${instant}${SEPARATOR}${input.project}${SEPARATOR}${text}\n`,
     'utf8',
   )
-  return { instant, project: input.project, text, line, date }
+  return { instant, project: input.project, text, date }
 }
 
 export async function readJots(opts: JotOpts = {}): Promise<Jot[]> {
@@ -71,10 +68,8 @@ export async function readJots(opts: JotOpts = {}): Promise<Jot[]> {
   for (const file of files) {
     const date = file.replace(/\.md$/, '')
     const contents = await readFile(join(dir, file), 'utf8')
-    let line = 0
     for (const raw of contents.split('\n')) {
       if (!raw.trim()) continue
-      line += 1
       const parts = raw.split(SEPARATOR)
       // A line that does not match the format is skipped, not fatal.
       if (parts.length < 3) continue
@@ -83,7 +78,6 @@ export async function readJots(opts: JotOpts = {}): Promise<Jot[]> {
         instant: instant!,
         project: project!,
         text: rest.join(SEPARATOR),
-        line,
         date,
       })
     }
