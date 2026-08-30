@@ -84,9 +84,11 @@ describe('rebuildFromDisk', () => {
   it('counts only notes actually indexed', async () => {
     await seedNote('n1', 'proj-a')
     await seedNote('n2', 'proj-a')
-    // A note id long enough to be valid but whose evidence ref is absurd is not
-    // enough to force a failure, so drive the failure through the store instead:
-    // make one note's project directory name collide with a file.
+    // No forced-failure case here: nothing reachable through parseNote can make
+    // indexNote throw, so there is no way to drive the catch branch in
+    // rebuildFromDisk from a note file. This test guards the counting logic
+    // itself (notesIndexed reflects successes, not files seen) rather than that
+    // branch.
     const report = await rebuildFromDisk(env)
     expect(report.notesIndexed).toBe(2)
     expect(report.errors).toEqual([])
