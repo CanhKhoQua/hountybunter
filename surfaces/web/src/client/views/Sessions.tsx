@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, calendarDate, type ActivityRow, type SessionRow } from '../api.js'
+import { RecordForm } from './RecordForm.js'
 
 export function Sessions({ timeZone }: { timeZone: string }) {
   const [rows, setRows] = useState<SessionRow[] | null>(null)
@@ -44,6 +45,8 @@ function Detail({
   onBack: () => void
 }) {
   const { session, activities } = detail
+  const [recorded, setRecorded] = useState<string | null>(null)
+  const date = calendarDate(session.started_at, timeZone)
 
   return (
     <div className="detail">
@@ -56,6 +59,19 @@ function Detail({
         {calendarDate(session.started_at, timeZone) ?? 'undated'} · {session.activities} activities
         {session.correlation === 'guessed' ? ' · correlation guessed' : ''}
       </p>
+
+      {/* The decision is recorded against the session that produced it, dated
+          from when that session ran — not from when it was written up. */}
+      {recorded ? (
+        <p className="recorded">Recorded as {recorded}.</p>
+      ) : date ? (
+        <RecordForm sessionId={session.id} date={date} onRecorded={setRecorded} />
+      ) : (
+        <p className="empty">
+          This session has no start time, so a decision recorded from it would have no
+          date to stand on. Re-run <code>hb ingest</code> first.
+        </p>
+      )}
 
       <ul className="activities">
         {activities.map((activity) => (
