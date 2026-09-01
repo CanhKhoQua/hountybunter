@@ -44,20 +44,23 @@ export function receiveHookEvent(
        ON CONFLICT DO NOTHING`,
     ).run(sessionId, kind, ts, JSON.stringify(payload))
 
-    // The hook knows the session id, which is what makes the binding exact. It
-    // does not know the transcript's content, so every column ingest owns is
-    // left alone — COALESCE keeps whatever is already there.
+    // The hook owns exactly two things: that this session exists, and that its
+    // identity is known rather than inferred.
+    //
+    // It deliberately does NOT set started_at. Hook events live in the index,
+    // and the index is deletable — so any column a hook filled in would come
+    // back different after a rebuild, and the final state would depend on
+    // whether the hook or the transcript happened to arrive first. Timestamps
+    // belong to the transcript, which a rebuild reproduces exactly.
     db.prepare(
-      `INSERT INTO sessions (id, project, started_at, correlation)
-       VALUES (@id, @project, @ts, 'exact')
+      `INSERT INTO sessions (id, project, correlation)
+       VALUES (@id, @project, 'exact')
        ON CONFLICT(id) DO UPDATE SET
          correlation = 'exact',
-         project     = COALESCE(sessions.project, excluded.project),
-         started_at  = COALESCE(sessions.started_at, excluded.started_at)`,
+         project     = COALESCE(sessions.project, excluded.project)`,
     ).run({
       id: sessionId,
       project: cwd ? projectSlug(cwd) : 'unknown',
-      ts,
     })
   })()
 

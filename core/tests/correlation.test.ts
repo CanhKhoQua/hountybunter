@@ -59,6 +59,8 @@ describe('correlation', () => {
     const hookFirst = getSession(db, 'sess-1')
     expect(hookFirst?.correlation).toBe('exact')
     expect(hookFirst?.title).toBe('what the session was about')
+    // The transcript's timestamp either way: a hook must not own a column that
+    // a rebuild has to reproduce, or the two orders would disagree.
     expect(hookFirst?.started_at).toBe('2026-09-01T09:59:00.000Z')
   })
 
