@@ -7,11 +7,18 @@ milliseconds, and — the reason this phase comes before the hunt view — a
 `session_id` known from the outside, so a session can be bound to its
 transcript exactly rather than guessed.
 
-**Why now, out of spec order.** Phase 5 was built first and works. But §7.4
-resolves a session to its transcript by waiting for the first hook whose `cwd`
-matches; with no hooks installed, every correlation falls back to
-`guessed`. Phase 6 spends its whole value on that binding, so the hooks come
-first.
+**Why now, out of spec order.** Phase 5 was built first and works.
+
+A correction to an earlier reading of §7.4: a session found by transcript
+ingest is already `exact`, because its id is the transcript's filename — there
+is nothing to guess. Verified against the real store: 162 of 162 sessions read
+`exact` with no hooks installed at all. `guessed` arises only in phase 6, where
+the UI spawns `claude` itself and has to work out which transcript is its own.
+
+Phase 4 still comes first, for the narrower reason §7.4 actually gives: the
+hook payload carries `session_id`, and that is what lets a PTY-spawned session
+be bound rather than inferred. The second reason is latency — the transcript is
+read on a timer, so without hooks nothing in the UI is live.
 
 **Architecture:** The plugin ships `hooks.json` posting to
 `http://127.0.0.1:<port>/hook`. The receiver is one more route in the phase 5
