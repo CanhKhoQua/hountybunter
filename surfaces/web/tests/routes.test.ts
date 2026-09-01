@@ -1,4 +1,4 @@
-import { mkdtemp } from 'node:fs/promises'
+import { mkdtemp, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
@@ -9,7 +9,9 @@ let env: NodeJS.ProcessEnv
 
 beforeEach(async () => {
   const home = await mkdtemp(join(tmpdir(), 'hb-web-'))
-  env = { HOUNTYBUNTER_HOME: home } as NodeJS.ProcessEnv
+  // Pinned, not inherited: the note's date must come from a declared zone,
+  // never from whatever timezone the machine running the server happens to be in.
+  env = { HOUNTYBUNTER_HOME: home, HOUNTYBUNTER_TZ: 'UTC' } as NodeJS.ProcessEnv
 
   const db = openDb(env)
   try {
@@ -83,5 +85,86 @@ describe('unknown routes', () => {
   it('404s rather than throwing', async () => {
     expect((await handle('GET', '/api/quarry', null, env)).status).toBe(404)
     expect((await handle('POST', '/api/sessions', null, env)).status).toBe(404)
+  })
+})
+
+describe('POST /api/notes', () => {
+  const decision = {
+    sessionId: 's1',
+    question: 'Dùng nền bản đồ nào?',
+    chosen: 'OpenFreeMap',
+    rejected: [{ option: 'CARTO', why_not: 'giới hạn request gói free' }],
+  }
+
+  it('writes a note into the project the session belongs to', async () => {
+    const res = await handle('POST', '/api/notes', decision, env)
+    expect(res.status).toBe(201)
+    expect(res.body.note.id).toBe('2026-08-20-dung-nen-ban-do-nao')
+    expect(res.body.note.project).toBe('proj-a')
+  })
+
+  it('dates the note from when the session ran, not from now', async () => {
+    const res = await handle('POST', '/api/notes', decision, env)
+    expect(res.body.note.decided_on).toBe('2026-08-20')
+  })
+
+  it('cites the session as evidence without being asked', async () => {
+    const res = await handle('POST', '/api/notes', decision, env)
+    expect(res.body.note.evidence).toContainEqual({ kind: 'session', ref: 's1' })
+  })
+
+  it('makes the rejected reason searchable straight away', async () => {
+    await handle('POST', '/api/notes', decision, env)
+    const found = await handle('GET', '/api/notes?q=' + encodeURIComponent('giới hạn request'), null, env)
+    expect(found.body.notes).toHaveLength(1)
+  })
+
+  it('writes a file that parses back as the same note', async () => {
+    const res = await handle('POST', '/api/notes', decision, env)
+    const written = await readFile(res.body.note.sourcePath, 'utf8')
+    const reparsed = parseNote(written, res.body.note.sourcePath)
+    expect(reparsed.chosen).toBe('OpenFreeMap')
+    expect(reparsed.rejected[0]?.why_not).toBe('giới hạn request gói free')
+  })
+
+  it('names the missing field instead of failing vaguely', async () => {
+    const noQuestion = await handle('POST', '/api/notes', { ...decision, question: '' }, env)
+    expect(noQuestion.status).toBe(400)
+    expect(String(noQuestion.body.error)).toMatch(/question/)
+
+    const noChosen = await handle('POST', '/api/notes', { ...decision, chosen: '  ' }, env)
+    expect(noChosen.status).toBe(400)
+    expect(String(noChosen.body.error)).toMatch(/chosen/)
+  })
+
+  it('refuses a session it has never ingested', async () => {
+    const res = await handle('POST', '/api/notes', { ...decision, sessionId: 'nope' }, env)
+    expect(res.status).toBe(404)
+    expect(String(res.body.error)).toMatch(/nope/)
+  })
+})
+
+describe('POST /api/notes across a date boundary', () => {
+  it('dates the note in the configured zone, not the machine zone', async () => {
+    const db = openDb(env)
+    try {
+      db.prepare(
+        `INSERT INTO sessions (id, project, started_at, correlation)
+         VALUES ('late', 'proj-a', '2026-08-20T18:00:00.000Z', 'exact')`,
+      ).run()
+    } finally {
+      db.close()
+    }
+
+    const vn = { ...env, HOUNTYBUNTER_TZ: 'Asia/Ho_Chi_Minh' } as NodeJS.ProcessEnv
+    const res = await handle(
+      'POST',
+      '/api/notes',
+      { sessionId: 'late', question: 'q', chosen: 'c' },
+      vn,
+    )
+
+    // 18:00 UTC on the 20th is 01:00 on the 21st in Ho Chi Minh City.
+    expect(res.body.note.decided_on).toBe('2026-08-21')
   })
 })
