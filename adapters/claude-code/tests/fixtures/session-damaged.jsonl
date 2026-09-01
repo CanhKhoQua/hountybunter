@@ -1,0 +1,5 @@
+{"type":"user","cwd":"/Users/x/proj","timestamp":"2026-08-27T11:00:00.000Z"}
+{ this line is not valid json
+{"type":"brand-new-record-type","cwd":"/Users/x/proj","payload":{"a":1}}
+42
+{"type":"assistant","cwd":"/Users/x/proj","timestamp":"2026-08-27T11:00:03.000Z","message":{"content":[{"type":"tool_use","name":"Read"}]}}
