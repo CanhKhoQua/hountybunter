@@ -9,7 +9,13 @@ import { serializeNote } from './serialize.js'
 
 export function slugifyTitle(title: string): string {
   return title
+    // NFD splits a marked letter into base + combining mark, so stripping the
+    // mark range leaves the base letter rather than deleting the whole character.
+    // `đ` carries a stroke, not a combining mark, and NFD does not touch it.
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
+    .replace(/đ/g, 'd')
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 60)
