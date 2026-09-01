@@ -11,6 +11,7 @@ import {
   promoteJot,
   readJots,
   rebuildFromDisk,
+  replaySpool,
   resolveTimeZone,
   searchNotes,
   snapshotState,
@@ -266,6 +267,10 @@ async function cmdIngest(io: Io): Promise<number> {
   const db = openDb(io.env)
   try {
     const report = await ingestAll(db, io.env)
+    const spooled = await replaySpool(db, io.env)
+    if (spooled.replayed > 0 || spooled.skipped > 0) {
+      io.out(`replayed ${spooled.replayed} spooled hook events (${spooled.skipped} skipped)`)
+    }
     io.out(`ingested ${report.activities} activities from ${report.sessions} sessions`)
     if (report.skippedLines > 0) io.out(`skipped ${report.skippedLines} malformed lines`)
     for (const [kind, count] of Object.entries(report.unknownKinds)) {

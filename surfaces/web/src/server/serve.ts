@@ -1,6 +1,6 @@
 import { rmSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
-import { portFile } from '@hountybunter/core'
+import { openDb, portFile, replaySpool } from '@hountybunter/core'
 import { createServer, type Server, type ServerResponse } from 'node:http'
 import { join, normalize, resolve, sep } from 'node:path'
 import { handle } from './routes.js'
@@ -85,7 +85,10 @@ export function serve(opts: ServeOptions = {}): Promise<Server> {
       }
 
       const url = req.url ?? '/'
-      if (!url.startsWith('/api/')) {
+      // `/hook` is an endpoint, not a page. Leaving it to the static branch made
+      // it answer 503, and curl treats an HTTP error as success — so events
+      // vanished without the hook ever noticing.
+      if (!url.startsWith('/api/') && !url.startsWith('/hook')) {
         void serveStatic(res, opts.clientDir, url.split('?')[0]!)
         return
       }
@@ -113,9 +116,18 @@ export function serve(opts: ServeOptions = {}): Promise<Server> {
       const address = server.address()
       const bound = typeof address === 'object' && address ? address.port : opts.port
 
-      // Publish the port that was actually bound, so a hook never has one
-      // hardcoded and a conflict never means editing the user's settings.
-      void writeFile(portFile(env), String(bound), 'utf8').then(() => resolve(server))
+      // Drain whatever arrived while nothing was listening, before announcing
+      // the port — otherwise the first live event can land ahead of older ones.
+      const db = openDb(env)
+      void replaySpool(db, env)
+        .catch(() => undefined)
+        .then(() => {
+          db.close()
+          // Publish the port actually bound, so a hook never has one hardcoded
+          // and a conflict never means editing the user's settings.
+          return writeFile(portFile(env), String(bound), 'utf8')
+        })
+        .then(() => resolve(server))
     })
 
     // A file left behind would point a hook at a server that is gone, which
