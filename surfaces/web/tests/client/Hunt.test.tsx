@@ -1,0 +1,145 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { Terminal } from '@xterm/xterm'
+import { Hunt } from '../../src/client/views/Hunt.js'
+
+/** Stands in for the browser's EventSource, which happy-dom does not provide. */
+class FakeEventSource {
+  static last: FakeEventSource | null = null
+  onmessage: ((event: { data: string }) => void) | null = null
+  onerror: (() => void) | null = null
+  closed = false
+  constructor(readonly url: string) {
+    FakeEventSource.last = this
+  }
+  close() {
+    this.closed = true
+  }
+  emit(payload: unknown) {
+    this.onmessage?.({ data: JSON.stringify(payload) })
+  }
+}
+
+let fetchMock: ReturnType<typeof vi.fn>
+let written: string[]
+let onDataHandlers: ((data: string) => void)[]
+
+const HUNT = {
+  id: 'hunt-1',
+  pid: 42,
+  cwd: '/w/proj',
+  startedAt: '2026-09-01T10:00:00.000Z',
+  exitCode: null,
+  killedAt: null,
+  command: 'claude',
+  binding: null,
+}
+
+function answer(url: string) {
+  if (url === '/api/hunts') return { hunts: [] }
+  if (url.startsWith('/api/hunts/')) return { hunt: HUNT }
+  return {}
+}
+
+beforeEach(() => {
+  written = []
+  onDataHandlers = []
+  FakeEventSource.last = null
+  vi.stubGlobal('EventSource', FakeEventSource)
+  vi.spyOn(Terminal.prototype, 'write').mockImplementation((data: string | Uint8Array) => {
+    written.push(String(data))
+  })
+  // `onData` is a getter returning an event registrar, not a method, so the
+  // spy has to replace the getter.
+  vi.spyOn(Terminal.prototype, 'onData', 'get').mockReturnValue(
+    ((handler: (d: string) => void) => {
+      onDataHandlers.push(handler)
+      return { dispose: () => undefined }
+    }) as never,
+  )
+  fetchMock = vi.fn(async (url: string, init?: { method?: string; body?: string }) => {
+    if (init?.method === 'POST' && url === '/api/hunts') {
+      return { ok: true, status: 201, json: async () => ({ hunt: HUNT }) }
+    }
+    return { ok: true, status: 200, json: async () => answer(url) }
+  })
+  vi.stubGlobal('fetch', fetchMock)
+})
+
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+  vi.restoreAllMocks()
+})
+
+/** Start a hunt and wait until its terminal is on screen. */
+async function startHunt() {
+  const user = userEvent.setup()
+  render(<Hunt />)
+  await user.type(await screen.findByLabelText(/directory/i), '/w/proj')
+  await user.click(screen.getByRole('button', { name: /start a hunt/i }))
+  await waitFor(() => expect(FakeEventSource.last).not.toBe(null))
+  return user
+}
+
+describe('Hunt', () => {
+  it('starts a hunt in the directory typed and opens its stream', async () => {
+    await startHunt()
+    const [url, init] = fetchMock.mock.calls.find(([, i]) => i?.method === 'POST')!
+    expect(url).toBe('/api/hunts')
+    expect(JSON.parse(init.body).cwd).toBe('/w/proj')
+    expect(FakeEventSource.last!.url).toBe('/api/hunts/hunt-1/stream')
+  })
+
+  it('writes streamed output into the terminal', async () => {
+    await startHunt()
+    FakeEventSource.last!.emit({ output: 'hello from the agent' })
+    await waitFor(() => expect(written.join('')).toContain('hello from the agent'))
+  })
+
+  it('sends what was typed to the input endpoint', async () => {
+    await startHunt()
+    await waitFor(() => expect(onDataHandlers).not.toHaveLength(0))
+    onDataHandlers[0]!('ls\r')
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([u]) => String(u).endsWith('/input'))
+      expect(call).toBeTruthy()
+      expect(JSON.parse(call![1].body).data).toBe('ls\r')
+    })
+  })
+
+  it('says in words that a binding is a guess', async () => {
+    fetchMock.mockImplementation(async (url: string, init?: { method?: string }) => {
+      if (init?.method === 'POST' && url === '/api/hunts') {
+        return { ok: true, status: 201, json: async () => ({ hunt: HUNT }) }
+      }
+      if (String(url).startsWith('/api/hunts/')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            hunt: { ...HUNT, binding: { sessionId: 'sess-9', correlation: 'guessed' } },
+          }),
+        }
+      }
+      return { ok: true, status: 200, json: async () => ({ hunts: [] }) }
+    })
+    await startHunt()
+    expect(await screen.findByText(/guessed/i)).toBeTruthy()
+    expect(await screen.findByText(/sess-9/)).toBeTruthy()
+  })
+
+  it('says a session is unbound rather than inventing one', async () => {
+    await startHunt()
+    // No hooks and no transcript yet. The absence is stated, not filled in.
+    expect(await screen.findByText(/not bound/i)).toBeTruthy()
+  })
+
+  it('reports the exit code when the hunt ends', async () => {
+    await startHunt()
+    FakeEventSource.last!.emit({ exit: 7 })
+    expect(await screen.findByText(/exited with 7/i)).toBeTruthy()
+    await waitFor(() => expect(FakeEventSource.last!.closed).toBe(true))
+  })
+})

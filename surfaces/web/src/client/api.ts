@@ -48,6 +48,30 @@ export interface RegionRow {
   notes: number
 }
 
+export interface HuntRow {
+  id: string
+  pid: number
+  cwd: string
+  startedAt: string
+  exitCode: number | null
+  killedAt: string | null
+  command: string
+  binding: { sessionId: string; correlation: 'exact' | 'guessed' } | null
+}
+
+async function post<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const detail = (await res.json().catch(() => null)) as { error?: string } | null
+    throw new Error(detail?.error ?? `${path} answered ${res.status}`)
+  }
+  return (res.status === 204 ? undefined : await res.json()) as T
+}
+
 export const api = {
   sessions: () => get<{ sessions: SessionRow[] }>('/api/sessions'),
   session: (id: string) =>
@@ -56,6 +80,12 @@ export const api = {
     get<{ notes: NoteHit[] }>(query ? `/api/notes?q=${encodeURIComponent(query)}` : '/api/notes'),
   note: (id: string) => get<{ note: Note }>(`/api/notes/${encodeURIComponent(id)}`),
   regions: () => get<{ regions: RegionRow[] }>('/api/regions'),
+  hunt: (id: string) => get<{ hunt: HuntRow }>(`/api/hunts/${encodeURIComponent(id)}`),
+  startHunt: (cwd: string) => post<{ hunt: HuntRow }>('/api/hunts', { cwd: cwd.trim() }),
+  sendInput: (id: string, data: string) =>
+    post<void>(`/api/hunts/${encodeURIComponent(id)}/input`, { data }),
+  resizeHunt: (id: string, cols: number, rows: number) =>
+    post<void>(`/api/hunts/${encodeURIComponent(id)}/resize`, { cols, rows }),
 }
 
 /**

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Menu } from './ui/Menu.js'
+import { Hunt } from './views/Hunt.js'
 import { Notes } from './views/Notes.js'
 import { Regions } from './views/Regions.js'
 import { Sessions } from './views/Sessions.js'
@@ -42,6 +43,7 @@ export function App() {
         <div className="stage-wrap" />
         <section className="panel">
           <h2>{TITLES[view]}</h2>
+          {view === 'hunt' ? <Hunt /> : null}
           {view === 'sessions' ? <Sessions timeZone={TIME_ZONE} /> : null}
           {view === 'notes' ? <Notes /> : null}
           {view === 'regions' ? <Regions /> : null}
