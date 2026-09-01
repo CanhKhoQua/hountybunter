@@ -236,3 +236,55 @@ describe('hb sessions', () => {
     expect(out.join('\n')).not.toMatch(/undefined|null/)
   })
 })
+
+describe('hb promote --rejected and --evidence', () => {
+  async function promote(...extra: string[]) {
+    await runCli(['jot', 'bỏ CARTO lấy OpenFreeMap'], io)
+    return runCli(
+      ['promote', '1', '--question', 'Which basemap?', '--chosen', 'OpenFreeMap', ...extra],
+      io,
+    )
+  }
+
+  it('records a rejected option written as `option :: why not`', async () => {
+    expect(await promote('--rejected', 'CARTO :: request cap on the free tier')).toBe(0)
+
+    out.length = 0
+    expect(await runCli(['search', 'request cap'], io)).toBe(0)
+    expect(out.join('\n')).toMatch(/Which basemap\?/)
+  })
+
+  it('records more than one rejected option', async () => {
+    expect(await promote(
+      '--rejected', 'CARTO :: request cap',
+      '--rejected', 'Mapbox :: needs a paid key',
+    )).toBe(0)
+
+    out.length = 0
+    await runCli(['search', 'paid key'], io)
+    expect(out.join('\n')).toMatch(/Which basemap\?/)
+  })
+
+  it('explains the syntax when the separator is missing instead of guessing', async () => {
+    expect(await promote('--rejected', 'CARTO was too slow')).toBe(1)
+    expect(err.join('\n')).toMatch(/::/)
+  })
+
+  it('records evidence written as `kind:ref`', async () => {
+    expect(await promote('--evidence', 'commit:99aee8c')).toBe(0)
+
+    out.length = 0
+    expect(await runCli(['list'], io)).toBe(0)
+    expect(out.join('\n')).toMatch(/Which basemap\?/)
+  })
+
+  it('rejects an evidence kind that is not one of the four', async () => {
+    expect(await promote('--evidence', 'tweet:12345')).toBe(1)
+    expect(err.join('\n')).toMatch(/file|commit|session|url/)
+  })
+
+  it('rejects evidence with no ref', async () => {
+    expect(await promote('--evidence', 'commit:')).toBe(1)
+    expect(err.join('\n').length).toBeGreaterThan(0)
+  })
+})
