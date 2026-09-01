@@ -24,6 +24,7 @@ confidence: high
 review_after: 2027-02-01
 supersedes:
   - 2026-01-01-old-choice
+origin: drafted
 ---
 
 Prose body.

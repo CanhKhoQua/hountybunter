@@ -6,6 +6,14 @@ export type NoteKind = (typeof NOTE_KINDS)[number]
 export const NOTE_STATUSES = ['standing', 'superseded', 'reversed'] as const
 export type NoteStatus = (typeof NOTE_STATUSES)[number]
 
+/**
+ * How a note came to be written. Stamped by the write path itself, never
+ * inferred from the content: a decision a person reasoned out and one an agent
+ * drafted for them read alike on the page but do not carry the same weight.
+ */
+export const NOTE_ORIGINS = ['authored', 'drafted'] as const
+export type NoteOrigin = (typeof NOTE_ORIGINS)[number]
+
 export const CONFIDENCES = ['high', 'medium', 'low'] as const
 export type Confidence = (typeof CONFIDENCES)[number]
 
@@ -35,6 +43,8 @@ export interface Note {
   evidence: Evidence[]
   confidence: Confidence | null
   review_after: string | null
+  /** Null for a note written before the channel was recorded — absent, not assumed. */
+  origin: NoteOrigin | null
   supersedes: string[]
   body: string
   /** Frontmatter keys we do not know about, preserved for a lossless round trip. */

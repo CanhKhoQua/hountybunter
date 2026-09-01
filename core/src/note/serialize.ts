@@ -23,6 +23,7 @@ export function serializeNote(note: Note): string {
   if (note.confidence) data.confidence = note.confidence
   if (note.review_after) data.review_after = note.review_after
   if (note.supersedes.length > 0) data.supersedes = note.supersedes
+  if (note.origin) data.origin = note.origin
 
   for (const [key, value] of Object.entries(note.extra)) data[key] = value
 

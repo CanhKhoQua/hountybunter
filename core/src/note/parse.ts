@@ -4,11 +4,13 @@ import {
   CONFIDENCES,
   EVIDENCE_KINDS,
   NOTE_KINDS,
+  NOTE_ORIGINS,
   NOTE_STATUSES,
   type Confidence,
   type Evidence,
   type Note,
   type NoteKind,
+  type NoteOrigin,
   type NoteStatus,
   type RejectedOption,
 } from '../types.js'
@@ -27,7 +29,7 @@ export class NoteParseError extends Error {
 /** Frontmatter keys the schema knows. Everything else is preserved in `extra`. */
 const KNOWN_KEYS = new Set([
   'id', 'title', 'project', 'kind', 'status', 'decided_on', 'question',
-  'chosen', 'rejected', 'evidence', 'confidence', 'review_after', 'supersedes',
+  'chosen', 'rejected', 'evidence', 'confidence', 'review_after', 'supersedes', 'origin',
 ])
 
 function str(value: unknown): string {
@@ -126,6 +128,7 @@ export function parseNote(raw: string, sourcePath: string): Note {
     confidence: oneOf<Confidence>(data.confidence, CONFIDENCES, 'confidence', sourcePath, null),
     review_after: dateStr(data.review_after) || null,
     supersedes: parseStringList(data.supersedes),
+    origin: oneOf<NoteOrigin>(data.origin, NOTE_ORIGINS, 'origin', sourcePath, null),
     body: parsed.content,
     extra,
     sourcePath,

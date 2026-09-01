@@ -99,3 +99,35 @@ describe('parseNote', () => {
     expect(parseNote(raw, '/store/i.md').review_after).toBe('2027-02-01')
   })
 })
+
+describe('parseNote origin', () => {
+  it('reads the origin channel from frontmatter', () => {
+    const note = parseNote(
+      `---\nquestion: q\nchosen: c\norigin: drafted\n---\n\nbody\n`,
+      '/store/a.md',
+    )
+    expect(note.origin).toBe('drafted')
+  })
+
+  it('leaves origin unknown when the file does not say', () => {
+    // Every note written before this field existed lacks it. Defaulting to
+    // `authored` would assert a human wrote the reasoning — an inference
+    // presented as fact, which is the one thing the store must never do.
+    // An absent signal is rendered as absent.
+    expect(parseNote(MINIMAL, '/store/a.md').origin).toBe(null)
+  })
+
+  it('rejects an origin outside the vocabulary', () => {
+    expect(() =>
+      parseNote(`---\nquestion: q\nchosen: c\norigin: robot\n---\n`, '/store/a.md'),
+    ).toThrow(NoteParseError)
+  })
+
+  it('does not leak origin into extra', () => {
+    const note = parseNote(
+      `---\nquestion: q\nchosen: c\norigin: authored\n---\n`,
+      '/store/a.md',
+    )
+    expect(note.extra).not.toHaveProperty('origin')
+  })
+})

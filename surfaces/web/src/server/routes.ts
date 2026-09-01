@@ -115,6 +115,10 @@ async function recordNote(body: DecisionBody, env: NodeJS.ProcessEnv): Promise<R
         instant: session.started_at ?? new Date().toISOString(),
         question: body.question,
         chosen: body.chosen,
+        // The form is a person typing into boxes. When a path arrives that
+        // records what an agent proposed, it declares itself there — this is
+        // not a default to inherit.
+        origin: 'authored',
         title: body.title,
         rejected: body.rejected ?? [],
         evidence,

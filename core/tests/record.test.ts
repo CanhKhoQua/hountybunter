@@ -13,6 +13,7 @@ beforeEach(async () => {
 })
 
 const base = {
+  origin: 'authored' as const,
   project: 'proj-a',
   instant: '2026-08-27T15:04:05.000Z',
   question: 'Which database?',
@@ -60,5 +61,29 @@ describe('recordDecision', () => {
       .rejects.toThrow(/question/)
     await expect(recordDecision({ ...base, chosen: '' }, { env, timeZone: 'UTC' }))
       .rejects.toThrow(/chosen/)
+  })
+})
+
+describe('recordDecision origin', () => {
+  it('stamps the origin the caller declares', async () => {
+    const note = await recordDecision({ ...base, origin: 'drafted' }, { env, timeZone: 'UTC' })
+    expect(note.origin).toBe('drafted')
+  })
+
+  it('writes the origin into the file, not only the returned object', async () => {
+    // The index is deletable by design, so a channel recorded only there would
+    // not survive `hb rebuild`. It has to live in the markdown or it is not
+    // durable at all.
+    const note = await recordDecision({ ...base, origin: 'drafted' }, { env, timeZone: 'UTC' })
+    expect(await readFile(note.sourcePath, 'utf8')).toContain('origin: drafted')
+  })
+
+  it('carries supersedes onto the note and into the file', async () => {
+    const note = await recordDecision(
+      { ...base, origin: 'authored', supersedes: ['2026-08-01-old-call'] },
+      { env, timeZone: 'UTC' },
+    )
+    expect(note.supersedes).toEqual(['2026-08-01-old-call'])
+    expect(await readFile(note.sourcePath, 'utf8')).toContain('2026-08-01-old-call')
   })
 })

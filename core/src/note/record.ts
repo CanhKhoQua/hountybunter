@@ -1,5 +1,5 @@
 import { calendarDate, resolveTimeZone } from '../time.js'
-import type { Evidence, Note, RejectedOption } from '../types.js'
+import type { Evidence, Note, NoteOrigin, RejectedOption } from '../types.js'
 import { makeNoteId, writeNote } from './store.js'
 
 export interface DecisionInput {
@@ -8,9 +8,17 @@ export interface DecisionInput {
   instant: string
   question: string
   chosen: string
+  /**
+   * Which write path this came through. Required, and deliberately not
+   * defaulted: a caller that has not said whether a person or an agent produced
+   * the reasoning should not be able to claim quietly that a person did.
+   */
+  origin: NoteOrigin
   title?: string
   rejected?: RejectedOption[]
   evidence?: Evidence[]
+  /** Ids of the notes this one replaces. */
+  supersedes?: string[]
   body?: string
 }
 
@@ -47,7 +55,8 @@ export async function recordDecision(input: DecisionInput, opts: RecordOpts = {}
     evidence: input.evidence ?? [],
     confidence: null,
     review_after: null,
-    supersedes: [],
+    origin: input.origin,
+    supersedes: input.supersedes ?? [],
     body: input.body ?? '',
     extra: {},
     sourcePath: '',
