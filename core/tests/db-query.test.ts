@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { indexNote } from '../src/db/write.js'
 import { openDb } from '../src/db/open.js'
-import { escapeFts, listNotes, searchNotes } from '../src/db/query.js'
+import { escapeFts, listNotes, listSessions, searchNotes } from '../src/db/query.js'
 import { parseNote } from '../src/note/parse.js'
 
 let db: ReturnType<typeof openDb>
@@ -82,5 +82,51 @@ describe('escapeFts', () => {
   it('wraps input in quotes and doubles embedded quotes', () => {
     expect(escapeFts('a AND b')).toBe('"a AND b"')
     expect(escapeFts('say "hi"')).toBe('"say ""hi"""')
+  })
+})
+
+describe('listSessions', () => {
+  function session(id: string, project: string, startedAt: string | null, title: string | null) {
+    db.prepare(
+      `INSERT INTO sessions (id, project, started_at, title, correlation)
+       VALUES (?, ?, ?, ?, 'exact')`,
+    ).run(id, project, startedAt, title)
+  }
+
+  function activity(sessionId: string, seq: number) {
+    db.prepare(
+      `INSERT INTO activities (session_id, seq, kind) VALUES (?, ?, 'user')`,
+    ).run(sessionId, seq)
+  }
+
+  beforeEach(() => {
+    session('s1', 'proj-a', '2026-08-20T10:00:00.000Z', 'oldest')
+    session('s2', 'proj-a', '2026-08-22T10:00:00.000Z', 'newest')
+    session('s3', 'proj-b', '2026-08-21T10:00:00.000Z', null)
+    activity('s1', 1)
+    activity('s1', 2)
+    activity('s2', 1)
+  })
+
+  it('lists sessions newest first', () => {
+    expect(listSessions(db).map((s) => s.id)).toEqual(['s2', 's3', 's1'])
+  })
+
+  it('counts the activities belonging to each session', () => {
+    const bySession = Object.fromEntries(listSessions(db).map((s) => [s.id, s.activities]))
+    expect(bySession).toEqual({ s1: 2, s2: 1, s3: 0 })
+  })
+
+  it('filters by project', () => {
+    expect(listSessions(db, { project: 'proj-b' }).map((s) => s.id)).toEqual(['s3'])
+  })
+
+  it('respects a limit', () => {
+    expect(listSessions(db, { limit: 1 }).map((s) => s.id)).toEqual(['s2'])
+  })
+
+  it('sorts a session with no start time last rather than dropping it', () => {
+    session('s4', 'proj-a', null, 'undated')
+    expect(listSessions(db).map((s) => s.id)).toEqual(['s2', 's3', 's1', 's4'])
   })
 })
