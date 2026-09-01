@@ -95,3 +95,49 @@ export function listSessions(
     )
     .all(...params) as SessionHit[]
 }
+
+export interface SessionDetail extends SessionHit {
+  ended_at: string | null
+  branch: string | null
+  model: string | null
+  /** 'exact' when bound by session_id, 'guessed' when inferred from cwd and time. */
+  correlation: string
+}
+
+export function getSession(db: Database.Database, id: string): SessionDetail | undefined {
+  return db
+    .prepare(
+      `SELECT s.id, s.project, s.started_at, s.ended_at, s.title, s.branch, s.model,
+              s.correlation,
+              (SELECT COUNT(*) FROM activities a WHERE a.session_id = s.id) AS activities
+       FROM sessions s
+       WHERE s.id = ?`,
+    )
+    .get(id) as SessionDetail | undefined
+}
+
+export interface ActivityRow {
+  id: number
+  seq: number
+  ts: string | null
+  kind: string
+  tool_name: string | null
+}
+
+export function listActivities(
+  db: Database.Database,
+  sessionId: string,
+  opts: { limit?: number } = {},
+): ActivityRow[] {
+  // Ordered by seq, not by id: seq is the transcript's own ordering, and an
+  // incremental ingest can insert an earlier session's rows after a later one's.
+  return db
+    .prepare(
+      `SELECT id, seq, ts, kind, tool_name
+       FROM activities
+       WHERE session_id = ?
+       ORDER BY seq ASC
+       LIMIT ?`,
+    )
+    .all(sessionId, opts.limit ?? 500) as ActivityRow[]
+}
