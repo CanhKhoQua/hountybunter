@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Menu } from './ui/Menu.js'
+import { Sessions } from './views/Sessions.js'
 
 const TITLES: Record<string, string> = {
   hunt: 'The hunt',
@@ -8,6 +9,13 @@ const TITLES: Record<string, string> = {
   regions: 'Regions',
   bounties: 'Bounties',
 }
+
+/**
+ * The zone every date on screen is computed in. Read once, explicitly, rather
+ * than letting each component fall back to the browser's local time — the same
+ * rule the server follows with HOUNTYBUNTER_TZ.
+ */
+const TIME_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
 
 export function App() {
   const [view, setView] = useState('hunt')
@@ -32,6 +40,7 @@ export function App() {
         <div className="stage-wrap" />
         <section className="panel">
           <h2>{TITLES[view]}</h2>
+          {view === 'sessions' ? <Sessions timeZone={TIME_ZONE} /> : null}
         </section>
       </main>
     </div>
