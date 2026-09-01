@@ -4,7 +4,15 @@ import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { indexNote } from '../src/db/write.js'
 import { openDb } from '../src/db/open.js'
-import { escapeFts, listNotes, listSessions, searchNotes } from '../src/db/query.js'
+import {
+  escapeFts,
+  getSession,
+  listActivities,
+  listNotes,
+  listRegions,
+  listSessions,
+  searchNotes,
+} from '../src/db/query.js'
 import { parseNote } from '../src/note/parse.js'
 
 let db: ReturnType<typeof openDb>
@@ -128,5 +136,63 @@ describe('listSessions', () => {
   it('sorts a session with no start time last rather than dropping it', () => {
     session('s4', 'proj-a', null, 'undated')
     expect(listSessions(db).map((s) => s.id)).toEqual(['s2', 's3', 's1', 's4'])
+  })
+})
+
+describe('getSession and listActivities', () => {
+  beforeEach(() => {
+    db.prepare(
+      `INSERT INTO sessions (id, project, started_at, title, correlation)
+       VALUES ('s1', 'proj-a', '2026-08-20T10:00:00.000Z', 'a hunt', 'guessed')`,
+    ).run()
+    for (const seq of [3, 1, 2]) {
+      db.prepare(
+        `INSERT INTO activities (session_id, seq, kind, tool_name) VALUES ('s1', ?, 'assistant', ?)`,
+      ).run(seq, `tool-${seq}`)
+    }
+  })
+
+  it('reads one session with its activity count and correlation', () => {
+    const session = getSession(db, 's1')
+    expect(session?.title).toBe('a hunt')
+    expect(session?.activities).toBe(3)
+    expect(session?.correlation).toBe('guessed')
+  })
+
+  it('returns undefined for an id that is not there', () => {
+    expect(getSession(db, 'nope')).toBeUndefined()
+  })
+
+  it('lists activities in seq order, not insertion order', () => {
+    expect(listActivities(db, 's1').map((a) => a.seq)).toEqual([1, 2, 3])
+  })
+
+  it('respects a limit', () => {
+    expect(listActivities(db, 's1', { limit: 2 }).map((a) => a.seq)).toEqual([1, 2])
+  })
+
+  it('returns an empty array for a session with nothing in it', () => {
+    expect(listActivities(db, 'nope')).toEqual([])
+  })
+})
+
+describe('listRegions', () => {
+  it('counts sessions and notes per project, busiest first', () => {
+    db.prepare(
+      `INSERT INTO sessions (id, project, started_at, correlation)
+       VALUES ('s1', 'proj-a', '2026-08-20T10:00:00.000Z', 'exact'),
+              ('s2', 'proj-a', '2026-08-21T10:00:00.000Z', 'exact'),
+              ('s3', 'proj-b', '2026-08-22T10:00:00.000Z', 'exact')`,
+    ).run()
+
+    expect(listRegions(db)).toEqual([
+      { project: 'proj-a', sessions: 2, notes: 2 },
+      { project: 'proj-b', sessions: 1, notes: 1 },
+      { project: 'proj-c', sessions: 0, notes: 1 },
+    ])
+  })
+
+  it('includes a project that has notes but no session yet', () => {
+    expect(listRegions(db).map((r) => r.project)).toContain('proj-c')
   })
 })

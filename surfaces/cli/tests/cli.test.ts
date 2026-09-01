@@ -1,9 +1,9 @@
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { appendJot, openDb } from '@hountybunter/core'
-import { runCli, type Io } from '../src/bin.js'
+import { runCli, stopWeb, type Io } from '../src/bin.js'
 
 let out: string[]
 let err: string[]
@@ -286,5 +286,29 @@ describe('hb promote --rejected and --evidence', () => {
   it('rejects evidence with no ref', async () => {
     expect(await promote('--evidence', 'commit:')).toBe(1)
     expect(err.join('\n').length).toBeGreaterThan(0)
+  })
+})
+
+describe('hb web', () => {
+  afterEach(stopWeb)
+
+  it('starts on an ephemeral port and prints the address it actually bound', async () => {
+    const code = await runCli(['web', '--port', '0'], io)
+    expect(code).toBe(0)
+
+    const printed = out.join('\n')
+    expect(printed).toMatch(/http:\/\/127\.0\.0\.1:\d+/)
+    // Never 0.0.0.0: the server has no auth, so it must not be reachable off-box.
+    expect(printed).not.toMatch(/0\.0\.0\.0/)
+  })
+
+  it('rejects a hostile port the way the other numeric flags do', async () => {
+    for (const port of ['-1', 'abc', '70000']) {
+      out.length = 0
+      err.length = 0
+      expect(await runCli(['web', '--port', port], io)).toBe(1)
+      expect(err.join('\n')).not.toMatch(/at .*\(.*:\d+:\d+\)/)
+      expect(err.join('\n').length).toBeGreaterThan(0)
+    }
   })
 })
