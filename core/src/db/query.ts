@@ -141,3 +141,26 @@ export function listActivities(
     )
     .all(sessionId, opts.limit ?? 500) as ActivityRow[]
 }
+
+export interface RegionRow {
+  project: string
+  sessions: number
+  notes: number
+}
+
+/**
+ * A project and what is known about it. Sessions and notes are unioned rather
+ * than joined from sessions alone: a project can hold notes before it has ever
+ * been ingested, and dropping it would hide ground the user has already walked.
+ */
+export function listRegions(db: Database.Database): RegionRow[] {
+  return db
+    .prepare(
+      `SELECT p.project AS project,
+              (SELECT COUNT(*) FROM sessions s WHERE s.project = p.project) AS sessions,
+              (SELECT COUNT(*) FROM notes n WHERE n.project = p.project) AS notes
+       FROM (SELECT project FROM sessions UNION SELECT project FROM notes) p
+       ORDER BY sessions DESC, p.project ASC`,
+    )
+    .all() as RegionRow[]
+}

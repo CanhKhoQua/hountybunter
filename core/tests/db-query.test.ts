@@ -4,7 +4,15 @@ import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { indexNote } from '../src/db/write.js'
 import { openDb } from '../src/db/open.js'
-import { escapeFts, getSession, listActivities, listNotes, listSessions, searchNotes } from '../src/db/query.js'
+import {
+  escapeFts,
+  getSession,
+  listActivities,
+  listNotes,
+  listRegions,
+  listSessions,
+  searchNotes,
+} from '../src/db/query.js'
 import { parseNote } from '../src/note/parse.js'
 
 let db: ReturnType<typeof openDb>
@@ -165,5 +173,26 @@ describe('getSession and listActivities', () => {
 
   it('returns an empty array for a session with nothing in it', () => {
     expect(listActivities(db, 'nope')).toEqual([])
+  })
+})
+
+describe('listRegions', () => {
+  it('counts sessions and notes per project, busiest first', () => {
+    db.prepare(
+      `INSERT INTO sessions (id, project, started_at, correlation)
+       VALUES ('s1', 'proj-a', '2026-08-20T10:00:00.000Z', 'exact'),
+              ('s2', 'proj-a', '2026-08-21T10:00:00.000Z', 'exact'),
+              ('s3', 'proj-b', '2026-08-22T10:00:00.000Z', 'exact')`,
+    ).run()
+
+    expect(listRegions(db)).toEqual([
+      { project: 'proj-a', sessions: 2, notes: 2 },
+      { project: 'proj-b', sessions: 1, notes: 1 },
+      { project: 'proj-c', sessions: 0, notes: 1 },
+    ])
+  })
+
+  it('includes a project that has notes but no session yet', () => {
+    expect(listRegions(db).map((r) => r.project)).toContain('proj-c')
   })
 })
