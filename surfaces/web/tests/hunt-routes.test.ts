@@ -180,3 +180,39 @@ describe('GET /api/hunts/:id — binding', () => {
     expect(res.body.hunt.binding).toBe(null)
   })
 })
+
+describe('a stream whose hunt ends', () => {
+  it('sends a final frame naming the exit code, then closes', async () => {
+    const hunt = hunts.start({ command: '/bin/sh', args: ['-c', 'echo bye; exit 7'] })
+    const res = await handle('GET', `/api/hunts/${hunt.id}/stream`, null, env, hunts)
+
+    const frames: string[] = []
+    let closed = false
+    res.stream!(
+      (chunk) => frames.push(chunk),
+      () => {
+        closed = true
+      },
+    )
+    await until(() => closed, 'the stream to close')
+
+    const last = JSON.parse(frames.at(-1)!.replace(/^data: /, '').trim())
+    expect(last.exit).toBe(7)
+    expect(frames.join('')).toContain('bye')
+  })
+
+  it('closes immediately for a hunt that is already gone', async () => {
+    const hunt = hunts.start({ command: '/bin/sh', args: ['-c', 'exit 0'] })
+    await until(() => hunt.exitCode !== null, 'the child to exit')
+
+    const res = await handle('GET', `/api/hunts/${hunt.id}/stream`, null, env, hunts)
+    let closed = false
+    res.stream!(
+      () => {},
+      () => {
+        closed = true
+      },
+    )
+    expect(closed).toBe(true)
+  })
+})

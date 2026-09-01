@@ -100,7 +100,10 @@ export function serve(opts: ServeOptions = {}): Promise<Server> {
             // Flush headers now: a terminal that only appears once the first
             // byte of output arrives looks like it failed to start.
             res.flushHeaders()
-            const unsubscribe = result.stream((chunk) => res.write(chunk))
+            const unsubscribe = result.stream(
+              (chunk) => res.write(chunk),
+              () => res.end(),
+            )
             // The agent keeps producing after the tab is gone. Without this the
             // writes pile into a closed socket for as long as the hunt lives.
             res.on('close', unsubscribe)

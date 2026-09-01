@@ -105,3 +105,63 @@ describe('HuntRegistry', () => {
     expect(seen).toHaveLength(countAtUnsubscribe)
   })
 })
+
+describe('a hunt that ends', () => {
+  it('tells its subscribers it ended instead of leaving them hanging', async () => {
+    const hunt = hunts.start({ command: '/bin/sh', args: ['-c', 'echo bye; exit 7'] })
+    let ended = false
+    hunt.subscribe(
+      () => {},
+      () => {
+        ended = true
+      },
+    )
+    await until(() => ended, 'the end signal')
+    expect(hunt.exitCode).toBe(7)
+  })
+
+  it('ends a subscriber that arrives after the child is already gone', async () => {
+    // Otherwise a tab opened on a finished hunt holds a connection that will
+    // never produce another byte and never close.
+    const hunt = hunts.start({ command: '/bin/sh', args: ['-c', 'echo bye; exit 0'] })
+    await until(() => hunt.exitCode !== null, 'the child to exit')
+
+    const seen: string[] = []
+    let ended = false
+    hunt.subscribe(
+      (chunk) => seen.push(chunk),
+      () => {
+        ended = true
+      },
+    )
+    expect(seen.join('')).toContain('bye')
+    expect(ended).toBe(true)
+  })
+
+  it('keeps its output readable after it is gone', async () => {
+    const hunt = hunts.start({ command: '/bin/sh', args: ['-c', 'echo last words'] })
+    await until(() => hunt.exitCode !== null, 'the child to exit')
+    expect(hunt.buffer()).toContain('last words')
+  })
+})
+
+describe('the registry does not grow without bound', () => {
+  it('drops the oldest dead hunts past the cap, and never a live one', async () => {
+    const small = new HuntRegistry({ max: 4, keepDead: 2 })
+    try {
+      const alive = small.start({ command: '/bin/sh', args: ['-c', 'sleep 30'] })
+      const dead = []
+      for (let i = 0; i < 3; i += 1) {
+        dead.push(small.start({ command: '/bin/sh', args: ['-c', `exit ${i}`] }))
+      }
+      await until(() => dead.every((h) => h.exitCode !== null), 'all three to exit')
+
+      const ids = small.list().map((h) => h.id)
+      expect(ids).toContain(alive.id)
+      expect(ids).not.toContain(dead[0]!.id)
+      expect(ids).toContain(dead[2]!.id)
+    } finally {
+      small.killAll()
+    }
+  })
+})

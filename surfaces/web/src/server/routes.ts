@@ -28,7 +28,7 @@ export interface Response {
    * than in the http shim so a stream is testable without a socket, like every
    * other route.
    */
-  stream?: (write: (chunk: string) => void) => () => void
+  stream?: (write: (chunk: string) => void, end: () => void) => () => void
 }
 
 /** Hunts outlive a request, so the registry is per-process, not per-call. */
@@ -257,8 +257,16 @@ async function huntRoute(
         Connection: 'keep-alive',
       },
       // The registry replays its backlog to a new subscriber, so a tab opened
-      // after the agent started talking still sees what it said.
-      stream: (write) => hunt.subscribe((output) => write(`data: ${JSON.stringify({ output })}\n\n`)),
+      // after the agent started talking still sees what it said — and tells it
+      // when the agent is gone, so the connection ends instead of hanging.
+      stream: (write, end) =>
+        hunt.subscribe(
+          (output) => write(`data: ${JSON.stringify({ output })}\n\n`),
+          () => {
+            write(`data: ${JSON.stringify({ exit: hunt.exitCode })}\n\n`)
+            end()
+          },
+        ),
     }
   }
 

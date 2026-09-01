@@ -34,8 +34,13 @@ export interface Hunt {
    */
   readonly killedAt: string | null
   buffer(): string
-  /** Replays the buffer to the new listener, then streams. Returns an unsubscribe. */
-  subscribe(listener: (chunk: string) => void): () => void
+  /**
+   * Replays the buffer to the new listener, then streams. `onEnd` fires when
+   * the process is gone — immediately if it already was, so a client attaching
+   * to a finished hunt is told so rather than left holding a connection that
+   * will never produce another byte. Returns an unsubscribe.
+   */
+  subscribe(listener: (chunk: string) => void, onEnd?: () => void): () => void
   write(data: string): void
   resize(cols: number, rows: number): void
 }
@@ -55,11 +60,16 @@ interface HuntState extends Hunt {
 export class HuntRegistry {
   private readonly hunts = new Map<string, HuntState>()
   private readonly max: number
+  private readonly keepDead: number
 
-  constructor(opts: { max?: number } = {}) {
+  constructor(opts: { max?: number; keepDead?: number } = {}) {
     // A hunt is a whole agent process. Without a ceiling, a page that retries a
     // failing start forks until the machine gives up.
     this.max = opts.max ?? 4
+    // Death is a state, but not a permanent one in memory: each dead hunt holds
+    // its output buffer, and a server left running for a week would accumulate
+    // every hunt it ever ran.
+    this.keepDead = opts.keepDead ?? 20
   }
 
   start(opts: StartOptions): Hunt {
@@ -72,7 +82,7 @@ export class HuntRegistry {
 
     const agent = spawnAgent(opts)
     const id = randomUUID()
-    const listeners = new Set<(chunk: string) => void>()
+    const listeners = new Set<{ data: (chunk: string) => void; end?: () => void }>()
     let buffered = ''
 
     const hunt: HuntState = {
@@ -85,11 +95,16 @@ export class HuntRegistry {
       killedAt: null,
       agent,
       buffer: () => buffered,
-      subscribe(listener) {
+      subscribe(listener, onEnd) {
         // The backlog first, so a tab opened a second late is not blank.
         if (buffered) listener(buffered)
-        listeners.add(listener)
-        return () => listeners.delete(listener)
+        if (hunt.exitCode !== null) {
+          onEnd?.()
+          return () => undefined
+        }
+        const entry = { data: listener, end: onEnd }
+        listeners.add(entry)
+        return () => listeners.delete(entry)
       },
       write: (data) => agent.write(data),
       resize: (cols, rows) => agent.resize(cols, rows),
@@ -97,13 +112,17 @@ export class HuntRegistry {
 
     agent.onData((chunk) => {
       buffered = (buffered + chunk).slice(-BUFFER_BYTES)
-      for (const listener of listeners) listener(chunk)
+      for (const listener of listeners) listener.data(chunk)
     })
     agent.onExit((code) => {
       // Death is a state the user needs to see, so the hunt stays listed with
       // its code rather than vanishing from the registry.
       ;(hunt as { exitCode: number | null }).exitCode = code
+      // Tell them, then forget them. Clearing without telling leaves every open
+      // stream waiting on a process that will never speak again.
+      for (const listener of listeners) listener.end?.()
       listeners.clear()
+      this.pruneDead()
     })
 
     this.hunts.set(id, hunt)
@@ -127,5 +146,13 @@ export class HuntRegistry {
 
   killAll(): void {
     for (const hunt of this.hunts.values()) hunt.agent.kill()
+  }
+
+  /** Keep the most recent dead hunts; a live one is never dropped. */
+  private pruneDead(): void {
+    const dead = [...this.hunts.values()].filter((h) => h.exitCode !== null)
+    for (const hunt of dead.slice(0, Math.max(0, dead.length - this.keepDead))) {
+      this.hunts.delete(hunt.id)
+    }
   }
 }
