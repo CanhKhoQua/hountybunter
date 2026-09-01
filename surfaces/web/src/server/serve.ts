@@ -1,4 +1,6 @@
-import { readFile } from 'node:fs/promises'
+import { rmSync } from 'node:fs'
+import { readFile, writeFile } from 'node:fs/promises'
+import { portFile } from '@hountybunter/core'
 import { createServer, type Server, type ServerResponse } from 'node:http'
 import { join, normalize, resolve, sep } from 'node:path'
 import { handle } from './routes.js'
@@ -90,6 +92,11 @@ export function serve(opts: ServeOptions = {}): Promise<Server> {
 
       handle(req.method ?? 'GET', url, body, env)
         .then((result) => {
+          if (result.status === 204) {
+            res.writeHead(204)
+            res.end()
+            return
+          }
           res.writeHead(result.status, { 'content-type': 'application/json' })
           res.end(JSON.stringify(result.body))
         })
@@ -102,6 +109,21 @@ export function serve(opts: ServeOptions = {}): Promise<Server> {
   })
 
   return new Promise((resolve) => {
-    server.listen(opts.port ?? 4771, '127.0.0.1', () => resolve(server))
+    server.listen(opts.port ?? 4771, '127.0.0.1', () => {
+      const address = server.address()
+      const bound = typeof address === 'object' && address ? address.port : opts.port
+
+      // Publish the port that was actually bound, so a hook never has one
+      // hardcoded and a conflict never means editing the user's settings.
+      void writeFile(portFile(env), String(bound), 'utf8').then(() => resolve(server))
+    })
+
+    // A file left behind would point a hook at a server that is gone, which
+    // turns every later hook into a timeout the agent's session pays for.
+    // Synchronous on purpose: the file must be gone by the time close()
+    // reports done, or a caller that restarts immediately races its own stale file.
+    server.on('close', () => {
+      rmSync(portFile(env), { force: true })
+    })
   })
 }
