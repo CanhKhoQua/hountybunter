@@ -8,6 +8,12 @@ export interface StartOptions {
   cols?: number
   rows?: number
   env?: NodeJS.ProcessEnv
+  /**
+   * Highest hook id seen before this process existed. Taken at spawn because it
+   * cannot be recovered afterwards: a moment later, this hunt's own hooks are
+   * already indistinguishable from those of a session that was running first.
+   */
+  sinceHookId?: number
 }
 
 /** Newest bytes kept for a client that connects after the agent started talking. */
@@ -17,6 +23,8 @@ export interface Hunt {
   readonly id: string
   readonly pid: number
   readonly startedAt: string
+  readonly cwd: string
+  readonly sinceHookId: number
   /** Null while the hunt is alive. Set once, and the hunt stays listed. */
   readonly exitCode: number | null
   /**
@@ -71,6 +79,8 @@ export class HuntRegistry {
       id,
       pid: agent.pid,
       startedAt: new Date().toISOString(),
+      cwd: opts.cwd ?? process.cwd(),
+      sinceHookId: opts.sinceHookId ?? 0,
       exitCode: null,
       killedAt: null,
       agent,

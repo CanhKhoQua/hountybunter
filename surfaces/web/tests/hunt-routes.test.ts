@@ -145,3 +145,38 @@ describe('DELETE /api/hunts/:id', () => {
     expect(hunts.list()).toHaveLength(1)
   })
 })
+
+describe('GET /api/hunts/:id — binding', () => {
+  it('reports no binding when nothing supports one', async () => {
+    const { body } = await start()
+    const res = await handle('GET', `/api/hunts/${body.hunt.id}`, null, env, hunts)
+    expect(res.status).toBe(200)
+    expect(res.body.hunt.binding).toBe(null)
+  })
+
+  it('reports exact once a hook names the session for this directory', async () => {
+    const { body } = await start()
+    await handle(
+      'POST',
+      '/hook',
+      { hook_event_name: 'SessionStart', session_id: 'sess-live', cwd },
+      env,
+      hunts,
+    )
+    const res = await handle('GET', `/api/hunts/${body.hunt.id}`, null, env, hunts)
+    expect(res.body.hunt.binding).toEqual({ sessionId: 'sess-live', correlation: 'exact' })
+  })
+
+  it('ignores a hook for a different directory', async () => {
+    const { body } = await start()
+    await handle(
+      'POST',
+      '/hook',
+      { hook_event_name: 'SessionStart', session_id: 'sess-other', cwd: '/somewhere/else' },
+      env,
+      hunts,
+    )
+    const res = await handle('GET', `/api/hunts/${body.hunt.id}`, null, env, hunts)
+    expect(res.body.hunt.binding).toBe(null)
+  })
+})

@@ -13,6 +13,7 @@ import {
 } from '@hountybunter/core'
 import type { Evidence, RejectedOption } from '@hountybunter/core'
 import { statSync } from 'node:fs'
+import { bindHunt, latestHookId, type Binding } from '@hountybunter/adapter-claude-code'
 import { HuntRegistry, type Hunt } from './hunts.js'
 
 export interface Response {
@@ -44,14 +45,18 @@ function agentCommand(env: NodeJS.ProcessEnv): string {
 }
 
 /** A hunt as the wire sees it: no process handle, no listeners. */
-function publicHunt(hunt: Hunt, command: string) {
+function publicHunt(hunt: Hunt, command: string, binding: Binding | null = null) {
   return {
     id: hunt.id,
     pid: hunt.pid,
     startedAt: hunt.startedAt,
+    cwd: hunt.cwd,
     exitCode: hunt.exitCode,
     killedAt: hunt.killedAt,
     command,
+    // Null until something supports a binding. Never a placeholder id, and
+    // never `exact` for anything a hook did not name.
+    binding,
   }
 }
 
@@ -199,14 +204,14 @@ interface HuntBody {
   data?: string
 }
 
-function huntRoute(
+async function huntRoute(
   method: string,
   id: string | undefined,
   action: string | undefined,
   body: unknown,
   env: NodeJS.ProcessEnv,
   hunts: HuntRegistry,
-): Response {
+): Promise<Response> {
   const command = agentCommand(env)
 
   if (!id) {
@@ -219,6 +224,22 @@ function huntRoute(
 
   const hunt = hunts.get(id)
   if (!hunt) return { status: 404, body: { error: `no hunt ${id}` } }
+
+  if (method === 'GET' && !action) {
+    // Resolved per request, not frozen at spawn: a hook is fire-and-forget and
+    // can arrive after the first paint, upgrading a guess to exact.
+    const db = openDb(env)
+    try {
+      const binding = await bindHunt(
+        db,
+        { cwd: hunt.cwd, sinceHookId: hunt.sinceHookId, startedAt: hunt.startedAt },
+        env,
+      )
+      return { status: 200, body: { hunt: publicHunt(hunt, command, binding) } }
+    } finally {
+      db.close()
+    }
+  }
 
   if (method === 'DELETE' && !action) {
     hunts.kill(id)
@@ -280,7 +301,14 @@ function startHunt(
     // Only the working directory comes from the request. Command, args and
     // environment are the server's, and the environment passes through
     // untouched so the agent loads exactly what it would in a terminal.
-    const hunt = hunts.start({ command, cwd, cols: body.cols, rows: body.rows, env })
+    const db = openDb(env)
+    let sinceHookId: number
+    try {
+      sinceHookId = latestHookId(db)
+    } finally {
+      db.close()
+    }
+    const hunt = hunts.start({ command, cwd, cols: body.cols, rows: body.rows, env, sinceHookId })
     return { status: 201, body: { hunt: publicHunt(hunt, command) } }
   } catch (error) {
     // The ceiling is a normal condition a client should handle, not a crash.
