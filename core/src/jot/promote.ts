@@ -1,11 +1,17 @@
 import { makeNoteId, writeNote } from '../note/store.js'
 import { calendarDate, resolveTimeZone } from '../time.js'
-import type { Note } from '../types.js'
+import type { Evidence, Note, RejectedOption } from '../types.js'
 import type { Jot, JotOpts } from './store.js'
 
 export async function promoteJot(
   jot: Jot,
-  input: { question: string; chosen: string; title?: string },
+  input: {
+    question: string
+    chosen: string
+    title?: string
+    rejected?: RejectedOption[]
+    evidence?: Evidence[]
+  },
   opts: JotOpts = {},
 ): Promise<Note> {
   const question = input.question.trim()
@@ -28,8 +34,8 @@ export async function promoteJot(
     decided_on: calendarDate(jot.instant, timeZone),
     question,
     chosen,
-    rejected: [],
-    evidence: [],
+    rejected: input.rejected ?? [],
+    evidence: input.evidence ?? [],
     confidence: null,
     review_after: null,
     supersedes: [],
