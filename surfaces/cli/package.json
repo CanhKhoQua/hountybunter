@@ -3,9 +3,12 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "bin": { "hb": "./src/cli.ts" },
+  "bin": {
+    "hb": "./src/cli.ts"
+  },
   "dependencies": {
+    "@hountybunter/adapter-claude-code": "*",
     "@hountybunter/core": "*",
-    "@hountybunter/adapter-claude-code": "*"
+    "@hountybunter/web": "^0.0.0"
   }
 }

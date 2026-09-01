@@ -37,7 +37,7 @@ export async function handle(
   body: unknown,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<Response> {
-  const [path, search] = rawPath.split('?')
+  const [path = '/', search] = rawPath.split('?')
   const params = new URLSearchParams(search ?? '')
 
   if (method === 'POST' && path === '/api/notes') return recordNote(body as DecisionBody, env)

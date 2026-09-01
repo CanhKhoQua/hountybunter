@@ -1,9 +1,60 @@
-import { createServer, type Server } from 'node:http'
+import { readFile } from 'node:fs/promises'
+import { createServer, type Server, type ServerResponse } from 'node:http'
+import { join, normalize, resolve, sep } from 'node:path'
 import { handle } from './routes.js'
 
 export interface ServeOptions {
   port?: number
   env?: NodeJS.ProcessEnv
+  /** Where the built client lives. Absent or unbuilt is reported, not guessed at. */
+  clientDir?: string
+}
+
+const TYPES: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.woff2': 'font/woff2',
+}
+
+function contentType(path: string): string {
+  const dot = path.lastIndexOf('.')
+  return (dot < 0 ? undefined : TYPES[path.slice(dot)]) ?? 'application/octet-stream'
+}
+
+async function serveStatic(
+  res: ServerResponse,
+  clientDir: string | undefined,
+  urlPath: string,
+): Promise<void> {
+  if (!clientDir) {
+    res.writeHead(503, { 'content-type': 'text/plain; charset=utf-8' })
+    res.end('The client is not built. Run `npm run build:web`.')
+    return
+  }
+
+  const root = resolve(clientDir)
+  // normalize collapses `..` before it can escape; the prefix check is the
+  // second lock, because a served file must never come from outside the build.
+  const requested = normalize(urlPath === '/' ? '/index.html' : urlPath)
+  const file = resolve(join(root, requested))
+  if (file !== root && !file.startsWith(root + sep)) {
+    res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' })
+    res.end('outside the client directory')
+    return
+  }
+
+  try {
+    const body = await readFile(file)
+    res.writeHead(200, { 'content-type': contentType(file) })
+    res.end(body)
+  } catch {
+    res.writeHead(503, { 'content-type': 'text/plain; charset=utf-8' })
+    res.end('The client is not built. Run `npm run build:web`.')
+  }
 }
 
 /**
@@ -31,7 +82,13 @@ export function serve(opts: ServeOptions = {}): Promise<Server> {
         }
       }
 
-      handle(req.method ?? 'GET', req.url ?? '/', body, env)
+      const url = req.url ?? '/'
+      if (!url.startsWith('/api/')) {
+        void serveStatic(res, opts.clientDir, url.split('?')[0]!)
+        return
+      }
+
+      handle(req.method ?? 'GET', url, body, env)
         .then((result) => {
           res.writeHead(result.status, { 'content-type': 'application/json' })
           res.end(JSON.stringify(result.body))

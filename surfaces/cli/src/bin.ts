@@ -17,6 +17,7 @@ import {
 } from '@hountybunter/core'
 import type { Evidence, EvidenceKind, RejectedOption } from '@hountybunter/core'
 import { ingestAll } from '@hountybunter/adapter-claude-code'
+import { serve } from '@hountybunter/web'
 
 export interface Io {
   out(line: string): void
@@ -36,7 +37,8 @@ const USAGE = `usage: hb <command>
   list [--project P] [--status S] [--limit N]
   ingest                              read new Claude Code transcript lines
   sessions [--project P] [--limit N]  list ingested sessions, newest first
-  rebuild [--verify]                  rebuild the index from disk`
+  rebuild [--verify]                  rebuild the index from disk
+  web [--port N]                      serve the local UI on 127.0.0.1`
 
 /** Parse a numeric CLI option, or explain precisely what was wrong with it. */
 function positiveInt(value: string | undefined, flag: string): number | undefined {
@@ -60,6 +62,7 @@ export async function runCli(argv: string[], io: Io): Promise<number> {
       case 'ingest': return await cmdIngest(io)
       case 'sessions': return await cmdSessions(rest, io)
       case 'rebuild': return await cmdRebuild(rest, io)
+      case 'web': return await cmdWeb(rest, io)
       default:
         io.err(USAGE)
         return 1
@@ -324,4 +327,41 @@ async function cmdSessions(args: string[], io: Io): Promise<number> {
   } finally {
     db.close()
   }
+}
+
+/** A port, where 0 legitimately means "pick a free one" — so positiveInt is wrong here. */
+function portNumber(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined
+  const n = Number(value)
+  if (!Number.isInteger(n) || n < 0 || n > 65535) {
+    throw new Error(`--port must be a whole number between 0 and 65535 — got "${value}"`)
+  }
+  return n
+}
+
+let running: Awaited<ReturnType<typeof serve>> | null = null
+
+/** Stop a server started by `hb web`. Exposed so a caller can end what it began. */
+export function stopWeb(): void {
+  running?.close()
+  running = null
+}
+
+async function cmdWeb(args: string[], io: Io): Promise<number> {
+  const { values } = parseArgs({ args, options: { port: { type: 'string' } } })
+  const port = portNumber(values.port) ?? 4771
+
+  running = await serve({ port, env: io.env, clientDir: clientDir() })
+  const address = running.address()
+  const bound = typeof address === 'object' && address ? address.port : port
+
+  // The address printed is the one actually bound, not the one asked for:
+  // with --port 0 they differ, and a URL that does not work is worse than none.
+  io.out(`hountybunter is at http://127.0.0.1:${bound}`)
+  return 0
+}
+
+/** The built client, next to this package rather than guessed from the cwd. */
+function clientDir(): string {
+  return new URL('../../web/dist/client/', import.meta.url).pathname
 }
