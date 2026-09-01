@@ -39,3 +39,13 @@ export function jotsDir(env: NodeJS.ProcessEnv = process.env): string {
 export function dbPath(env: NodeJS.ProcessEnv = process.env): string {
   return join(storeRoot(env), 'index.db')
 }
+
+/** Where the running server publishes the port it actually bound. */
+export function portFile(env: NodeJS.ProcessEnv = process.env): string {
+  return join(storeRoot(env), 'port')
+}
+
+/** Where a hook parks an event when nothing is listening. */
+export function spoolFile(env: NodeJS.ProcessEnv = process.env): string {
+  return join(storeRoot(env), 'spool.jsonl')
+}

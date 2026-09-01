@@ -100,8 +100,11 @@ lifecycle, its own port discovery, and its own failure mode for no gain.
       `session_id` is rejected with a message rather than stored.
 - [ ] **Step 2: Run test to verify it fails.**
 - [ ] **Step 3: Write minimal implementation** — schema addition plus
-      `core/src/hooks/receive.ts`. Bump the schema version so a stale index is
-      caught rather than silently mismatched.
+      `core/src/hooks/receive.ts`. **Do not bump `SCHEMA_VERSION`.** The schema
+      is applied with `CREATE TABLE IF NOT EXISTS`, so a new table appears on
+      the next open; bumping would make every existing index throw and force a
+      delete-and-rebuild to gain nothing. The guard exists for changes that
+      make an old index *wrong*, and adding a table is not one.
 - [ ] **Step 4: Run test to verify it passes**, plus a rebuild-from-disk run
       proving `hook_events` is still derived and disposable.
 - [ ] **Step 5: Commit** — `feat(core): receive a hook event idempotently`
