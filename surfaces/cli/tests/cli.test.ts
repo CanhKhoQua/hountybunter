@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { appendJot, openDb } from '@hountybunter/core'
+import { appendJot, openDb, readJots } from '@hountybunter/core'
 import { runCli, stopWeb, type Io } from '../src/bin.js'
 
 let out: string[]
@@ -31,6 +31,21 @@ describe('hb jot', () => {
   it('fails with a message when given no text', async () => {
     expect(await runCli(['jot'], io)).toBe(1)
     expect(err.join('\n')).toMatch(/text/i)
+  })
+
+  it('refuses a flag instead of recording it as the note', async () => {
+    // `hb jot --help` used to file a jot whose entire content was "--help".
+    // Swallowing an unrecognised flag as prose corrupts the store silently,
+    // which is worse than any error message.
+    expect(await runCli(['jot', '--help'], io)).toBe(1)
+    expect(err.join('\n')).toMatch(/--help/)
+    expect(await readJots({ env: io.env })).toHaveLength(0)
+  })
+
+  it('records a leading dash as text after an explicit --', async () => {
+    expect(await runCli(['jot', '--', '--help is the literal point'], io)).toBe(0)
+    const jots = await readJots({ env: io.env })
+    expect(jots[0]!.text).toBe('--help is the literal point')
   })
 })
 

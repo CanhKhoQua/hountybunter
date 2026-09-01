@@ -77,7 +77,15 @@ export async function runCli(argv: string[], io: Io): Promise<number> {
 }
 
 async function cmdJot(args: string[], io: Io): Promise<number> {
-  const text = args.join(' ').trim()
+  // `hb jot` takes no flags, so anything that looks like one is a mistake — and
+  // filing it as the note's text corrupts the store without a word. `--` is the
+  // usual escape for text that genuinely starts with a dash.
+  const words = args[0] === '--' ? args.slice(1) : args
+  if (args[0] !== '--' && args[0]?.startsWith('-')) {
+    io.err(`hb jot: takes text, not flags — got "${args[0]}". Use \`hb jot -- ${args[0]}\` to jot it literally.`)
+    return 1
+  }
+  const text = words.join(' ').trim()
   if (!text) {
     io.err('hb jot: needs some text')
     return 1
