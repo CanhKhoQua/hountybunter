@@ -1,4 +1,5 @@
 import {
+  getNote,
   getSession,
   indexNote,
   listActivities,
@@ -62,6 +63,14 @@ export async function handle(
       const query = params.get('q')?.trim()
       const notes = query ? searchNotes(db, query) : listNotes(db)
       return { status: 200, body: { notes } }
+    }
+
+    const noteDetail = path.match(/^\/api\/notes\/(.+)$/)
+    if (noteDetail) {
+      const id = decodeURIComponent(noteDetail[1]!)
+      const note = await getNote(db, id)
+      if (!note) return { status: 404, body: { error: `no note ${id}` } }
+      return { status: 200, body: { note } }
     }
 
     if (path === '/api/regions') {

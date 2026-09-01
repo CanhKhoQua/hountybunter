@@ -23,10 +23,39 @@ async function get<T>(path: string): Promise<T> {
 }
 
 // The only place a URL string is written, so renaming a route breaks one file.
+export interface NoteHit {
+  id: string
+  project: string
+  title: string
+  kind: string
+  status: string
+  snippet: string
+}
+
+export interface Note {
+  id: string
+  title: string
+  question: string
+  chosen: string
+  status: string
+  rejected: { option: string; why_not: string }[]
+  evidence: { kind: string; ref: string }[]
+}
+
+export interface RegionRow {
+  project: string
+  sessions: number
+  notes: number
+}
+
 export const api = {
   sessions: () => get<{ sessions: SessionRow[] }>('/api/sessions'),
   session: (id: string) =>
     get<{ session: SessionRow; activities: ActivityRow[] }>(`/api/sessions/${encodeURIComponent(id)}`),
+  notes: (query?: string) =>
+    get<{ notes: NoteHit[] }>(query ? `/api/notes?q=${encodeURIComponent(query)}` : '/api/notes'),
+  note: (id: string) => get<{ note: Note }>(`/api/notes/${encodeURIComponent(id)}`),
+  regions: () => get<{ regions: RegionRow[] }>('/api/regions'),
 }
 
 /**

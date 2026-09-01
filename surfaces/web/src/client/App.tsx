@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { Menu } from './ui/Menu.js'
+import { Notes } from './views/Notes.js'
+import { Regions } from './views/Regions.js'
 import { Sessions } from './views/Sessions.js'
 
 const TITLES: Record<string, string> = {
@@ -41,6 +43,14 @@ export function App() {
         <section className="panel">
           <h2>{TITLES[view]}</h2>
           {view === 'sessions' ? <Sessions timeZone={TIME_ZONE} /> : null}
+          {view === 'notes' ? <Notes /> : null}
+          {view === 'regions' ? <Regions /> : null}
+          {view === 'bounties' ? (
+            <p className="empty">
+              Phase 8, not built. Until then GitHub issues are the source of truth, and a
+              note can point at one with evidence of kind <code>url</code>.
+            </p>
+          ) : null}
         </section>
       </main>
     </div>

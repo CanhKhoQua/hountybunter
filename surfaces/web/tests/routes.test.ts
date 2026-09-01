@@ -168,3 +168,29 @@ describe('POST /api/notes across a date boundary', () => {
     expect(res.body.note.decided_on).toBe('2026-08-21')
   })
 })
+
+describe('GET /api/notes/:id', () => {
+  it('returns the whole record, including what lost and why', async () => {
+    const created = await handle(
+      'POST',
+      '/api/notes',
+      {
+        sessionId: 's1',
+        question: 'Which basemap?',
+        chosen: 'OpenFreeMap',
+        rejected: [{ option: 'CARTO', why_not: 'request cap on the free tier' }],
+      },
+      env,
+    )
+
+    const res = await handle('GET', `/api/notes/${created.body.note.id}`, null, env)
+    expect(res.status).toBe(200)
+    expect(res.body.note.chosen).toBe('OpenFreeMap')
+    expect(res.body.note.rejected[0].why_not).toBe('request cap on the free tier')
+  })
+
+  it('404s for a note that is not in the store', async () => {
+    const res = await handle('GET', '/api/notes/2026-01-01-nope', null, env)
+    expect(res.status).toBe(404)
+  })
+})
