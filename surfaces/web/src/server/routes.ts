@@ -7,6 +7,7 @@ import {
   listRegions,
   listSessions,
   openDb,
+  receiveHookEvent,
   recordDecision,
   searchNotes,
 } from '@hountybunter/core'
@@ -14,8 +15,9 @@ import type { Evidence, RejectedOption } from '@hountybunter/core'
 
 export interface Response {
   status: number
+  /** Absent for 204: a hook is told nothing, so there is nothing to send. */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  body: any
+  body?: any
 }
 
 /**
@@ -40,6 +42,7 @@ export async function handle(
   const [path = '/', search] = rawPath.split('?')
   const params = new URLSearchParams(search ?? '')
 
+  if (method === 'POST' && path === '/hook') return receiveHook(body, env)
   if (method === 'POST' && path === '/api/notes') return recordNote(body as DecisionBody, env)
   if (method !== 'GET') return { status: 404, body: { error: `no route for ${method} ${path}` } }
 
@@ -121,6 +124,22 @@ async function recordNote(body: DecisionBody, env: NodeJS.ProcessEnv): Promise<R
 
     indexNote(db, note)
     return { status: 201, body: { note } }
+  } finally {
+    db.close()
+  }
+}
+
+/**
+ * Take one hook event. Answers immediately and says nothing back: the hook is
+ * fire-and-forget by contract (spec §7.2), and anything this returns is work
+ * the agent's own session would have waited for.
+ */
+function receiveHook(body: unknown, env: NodeJS.ProcessEnv): Response {
+  const db = openDb(env)
+  try {
+    const result = receiveHookEvent(db, (body ?? {}) as Record<string, unknown>)
+    if (!result.ok) return { status: 400, body: { error: result.error } }
+    return { status: 204 }
   } finally {
     db.close()
   }

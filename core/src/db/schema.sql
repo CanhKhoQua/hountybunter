@@ -78,3 +78,16 @@ CREATE TABLE IF NOT EXISTS ingest_cursors (
   byte_offset   INTEGER NOT NULL,
   last_seen_at  TEXT NOT NULL
 );
+
+-- Live events from the agent CLI. Derived like everything else here: the
+-- transcript remains the durable record, and this table exists so a session can
+-- be bound to its id the moment it starts rather than inferred afterwards.
+CREATE TABLE IF NOT EXISTS hook_events (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id   TEXT NOT NULL,
+  kind         TEXT NOT NULL,
+  ts           TEXT,
+  payload_json TEXT NOT NULL,
+  UNIQUE (session_id, kind, ts, payload_json)
+);
+CREATE INDEX IF NOT EXISTS hook_events_session_idx ON hook_events(session_id);

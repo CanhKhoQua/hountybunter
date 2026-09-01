@@ -1,0 +1,6 @@
+{
+  "name": "hountybunter",
+  "version": "0.0.0",
+  "description": "Observes your coding sessions so the reasoning behind a decision survives it. Powered by Claude.",
+  "author": { "name": "Loc Nguyen" }
+}
