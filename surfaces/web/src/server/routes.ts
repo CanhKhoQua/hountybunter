@@ -12,12 +12,47 @@ import {
   searchNotes,
 } from '@hountybunter/core'
 import type { Evidence, RejectedOption } from '@hountybunter/core'
+import { statSync } from 'node:fs'
+import { HuntRegistry, type Hunt } from './hunts.js'
 
 export interface Response {
   status: number
   /** Absent for 204: a hook is told nothing, so there is nothing to send. */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   body?: any
+  headers?: Record<string, string>
+  /**
+   * A response that stays open. `serve.ts` wires the writer to the socket and
+   * calls the returned function when the client disconnects. Kept here rather
+   * than in the http shim so a stream is testable without a socket, like every
+   * other route.
+   */
+  stream?: (write: (chunk: string) => void) => () => void
+}
+
+/** Hunts outlive a request, so the registry is per-process, not per-call. */
+const defaultHunts = new HuntRegistry()
+
+/**
+ * The agent binary to run. Taken from the environment, never from the request:
+ * this port has no auth by design (§2, one local user), and a client-supplied
+ * command would turn that into arbitrary execution for anything on the machine
+ * that can post a form.
+ */
+function agentCommand(env: NodeJS.ProcessEnv): string {
+  return env.HOUNTYBUNTER_AGENT_CMD || 'claude'
+}
+
+/** A hunt as the wire sees it: no process handle, no listeners. */
+function publicHunt(hunt: Hunt, command: string) {
+  return {
+    id: hunt.id,
+    pid: hunt.pid,
+    startedAt: hunt.startedAt,
+    exitCode: hunt.exitCode,
+    killedAt: hunt.killedAt,
+    command,
+  }
 }
 
 /**
@@ -38,12 +73,20 @@ export async function handle(
   rawPath: string,
   body: unknown,
   env: NodeJS.ProcessEnv = process.env,
+  hunts: HuntRegistry = defaultHunts,
 ): Promise<Response> {
   const [path = '/', search] = rawPath.split('?')
   const params = new URLSearchParams(search ?? '')
 
   if (method === 'POST' && path === '/hook') return receiveHook(body, env)
   if (method === 'POST' && path === '/api/notes') return recordNote(body as DecisionBody, env)
+
+  const hunted = path.match(/^\/api\/hunts(?:\/([^/]+))?(?:\/(stream|input|resize))?$/)
+  if (hunted) {
+    const [, id, action] = hunted
+    return huntRoute(method, id, action, body, env, hunts)
+  }
+
   if (method !== 'GET') return { status: 404, body: { error: `no route for ${method} ${path}` } }
 
   // One connection per request, always closed: the index is a file, and a
@@ -146,5 +189,101 @@ function receiveHook(body: unknown, env: NodeJS.ProcessEnv): Response {
     return { status: 204 }
   } finally {
     db.close()
+  }
+}
+
+interface HuntBody {
+  cwd?: string
+  cols?: number
+  rows?: number
+  data?: string
+}
+
+function huntRoute(
+  method: string,
+  id: string | undefined,
+  action: string | undefined,
+  body: unknown,
+  env: NodeJS.ProcessEnv,
+  hunts: HuntRegistry,
+): Response {
+  const command = agentCommand(env)
+
+  if (!id) {
+    if (method === 'GET') {
+      return { status: 200, body: { hunts: hunts.list().map((h) => publicHunt(h, command)) } }
+    }
+    if (method === 'POST') return startHunt(body as HuntBody, env, hunts, command)
+    return { status: 404, body: { error: `no route for ${method} /api/hunts` } }
+  }
+
+  const hunt = hunts.get(id)
+  if (!hunt) return { status: 404, body: { error: `no hunt ${id}` } }
+
+  if (method === 'DELETE' && !action) {
+    hunts.kill(id)
+    return { status: 204 }
+  }
+
+  if (method === 'GET' && action === 'stream') {
+    return {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        // Without this a proxy can hold the whole stream to buffer it, which
+        // for a terminal means the screen arrives after the session ends.
+        Connection: 'keep-alive',
+      },
+      // The registry replays its backlog to a new subscriber, so a tab opened
+      // after the agent started talking still sees what it said.
+      stream: (write) => hunt.subscribe((output) => write(`data: ${JSON.stringify({ output })}\n\n`)),
+    }
+  }
+
+  const payload = (body ?? {}) as HuntBody
+  if (method === 'POST' && action === 'input') {
+    if (typeof payload.data !== 'string') {
+      return { status: 400, body: { error: 'input needs a string `data`' } }
+    }
+    hunt.write(payload.data)
+    return { status: 204 }
+  }
+
+  if (method === 'POST' && action === 'resize') {
+    const { cols, rows } = payload
+    if (!Number.isInteger(cols) || !Number.isInteger(rows) || cols! < 1 || rows! < 1) {
+      return { status: 400, body: { error: 'resize needs positive whole `cols` and `rows`' } }
+    }
+    hunt.resize(cols!, rows!)
+    return { status: 204 }
+  }
+
+  return { status: 404, body: { error: `no route for ${method} /api/hunts/${id}` } }
+}
+
+function startHunt(
+  body: HuntBody,
+  env: NodeJS.ProcessEnv,
+  hunts: HuntRegistry,
+  command: string,
+): Response {
+  const cwd = body?.cwd?.trim()
+  if (!cwd) return { status: 400, body: { error: 'cwd is required' } }
+  try {
+    if (!statSync(cwd).isDirectory()) throw new Error('not a directory')
+  } catch {
+    return { status: 400, body: { error: `cannot start a hunt in ${cwd}: no such directory` } }
+  }
+
+  try {
+    // Only the working directory comes from the request. Command, args and
+    // environment are the server's, and the environment passes through
+    // untouched so the agent loads exactly what it would in a terminal.
+    const hunt = hunts.start({ command, cwd, cols: body.cols, rows: body.rows, env })
+    return { status: 201, body: { hunt: publicHunt(hunt, command) } }
+  } catch (error) {
+    // The ceiling is a normal condition a client should handle, not a crash.
+    return { status: 429, body: { error: (error as Error).message } }
   }
 }

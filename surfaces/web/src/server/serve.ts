@@ -95,12 +95,23 @@ export function serve(opts: ServeOptions = {}): Promise<Server> {
 
       handle(req.method ?? 'GET', url, body, env)
         .then((result) => {
+          if (result.stream) {
+            res.writeHead(result.status, result.headers)
+            // Flush headers now: a terminal that only appears once the first
+            // byte of output arrives looks like it failed to start.
+            res.flushHeaders()
+            const unsubscribe = result.stream((chunk) => res.write(chunk))
+            // The agent keeps producing after the tab is gone. Without this the
+            // writes pile into a closed socket for as long as the hunt lives.
+            res.on('close', unsubscribe)
+            return
+          }
           if (result.status === 204) {
             res.writeHead(204)
             res.end()
             return
           }
-          res.writeHead(result.status, { 'content-type': 'application/json' })
+          res.writeHead(result.status, { 'content-type': 'application/json', ...result.headers })
           res.end(JSON.stringify(result.body))
         })
         .catch((error: unknown) => {
