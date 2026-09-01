@@ -1,13 +1,16 @@
 import { parseArgs } from 'node:util'
 import {
   appendJot,
+  calendarDate,
   indexNote,
   listNotes,
+  listSessions,
   openDb,
   projectSlug,
   promoteJot,
   readJots,
   rebuildFromDisk,
+  resolveTimeZone,
   searchNotes,
   snapshotState,
 } from '@hountybunter/core'
@@ -28,6 +31,7 @@ const USAGE = `usage: hb <command>
   search <query> [--project P] [--limit N]
   list [--project P] [--status S] [--limit N]
   ingest                              read new Claude Code transcript lines
+  sessions [--project P] [--limit N]  list ingested sessions, newest first
   rebuild [--verify]                  rebuild the index from disk`
 
 /** Parse a numeric CLI option, or explain precisely what was wrong with it. */
@@ -50,6 +54,7 @@ export async function runCli(argv: string[], io: Io): Promise<number> {
       case 'search': return await cmdSearch(rest, io)
       case 'list': return await cmdList(rest, io)
       case 'ingest': return await cmdIngest(io)
+      case 'sessions': return await cmdSessions(rest, io)
       case 'rebuild': return await cmdRebuild(rest, io)
       default:
         io.err(USAGE)
@@ -246,4 +251,34 @@ async function cmdRebuild(args: string[], io: Io): Promise<number> {
     io.out('verified: a second rebuild produced identical state')
   }
   return report.errors.length > 0 ? 1 : 0
+}
+
+async function cmdSessions(args: string[], io: Io): Promise<number> {
+  const { values } = parseArgs({
+    args,
+    options: { project: { type: 'string' }, limit: { type: 'string' } },
+  })
+
+  const db = openDb(io.env)
+  try {
+    const hits = listSessions(db, {
+      project: values.project,
+      limit: positiveInt(values.limit, '--limit'),
+    })
+    if (hits.length === 0) {
+      io.out('no sessions yet — run `hb ingest` first')
+      return 0
+    }
+    const timeZone = resolveTimeZone(io.env)
+    for (const hit of hits) {
+      // A session with no observed timestamp is dated `undated` rather than
+      // silently borrowing today's date, matching how an absent HP signal is
+      // shown as absent.
+      const date = hit.started_at ? calendarDate(hit.started_at, timeZone) : 'undated'
+      io.out(`${date}  ${hit.id}  ${hit.activities} acts  ${hit.title ?? '(untitled)'}`)
+    }
+    return 0
+  } finally {
+    db.close()
+  }
 }
