@@ -1,0 +1,18 @@
+#!/bin/sh
+# Launcher for local use: resolves the repository from its own location, so the
+# script can be symlinked onto PATH from anywhere and still find the workspace.
+# One level of symlink is followed, which is what `ln -s` onto PATH produces.
+#
+# It runs the TypeScript sources through tsx because the workspace packages
+# still point at `src/*.ts`; there is no build step to install. Packaging a
+# standalone binary is phase 10.
+self=$0
+[ -L "$self" ] && self=$(readlink "$self")
+root=$(CDPATH= cd -- "$(dirname -- "$self")/.." && pwd) || exit 1
+
+if [ ! -x "$root/node_modules/.bin/tsx" ]; then
+  echo "hb: dependencies are not installed — run \`npm install\` in $root" >&2
+  exit 1
+fi
+
+exec "$root/node_modules/.bin/tsx" "$root/surfaces/cli/src/cli.ts" "$@"
