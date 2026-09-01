@@ -34,6 +34,25 @@ describe('slugifyTitle', () => {
   it('truncates very long titles', () => {
     expect(slugifyTitle('x'.repeat(200)).length).toBeLessThanOrEqual(60)
   })
+
+  it('folds Vietnamese diacritics to their base letters instead of dropping them', () => {
+    // Dropping the marked characters left consonant rubble — "Dùng nền bản đồ nào?"
+    // slugified to "d-ng-n-n-b-n-n-o", which names nothing and sorts as noise.
+    expect(slugifyTitle('Dùng nền bản đồ nào?')).toBe('dung-nen-ban-do-nao')
+  })
+
+  it('folds đ, which carries a stroke rather than a combining mark', () => {
+    expect(slugifyTitle('Đối trừ công nợ')).toBe('doi-tru-cong-no')
+  })
+
+  it('lets two titles differing only by a tone mark share a slug, deliberately', () => {
+    // Folding trades this collision away on purpose. A CJK title slugifies to
+    // nothing, so every such title collides and makeNoteId must add a hash; two
+    // Vietnamese titles collide only when they are identical apart from tone, in
+    // the same project on the same day. Suffixing every Vietnamese id to cover
+    // that would disfigure every id this store will ever hold.
+    expect(slugifyTitle('Ghi ca')).toBe(slugifyTitle('Ghi cá'))
+  })
 })
 
 describe('makeNoteId', () => {

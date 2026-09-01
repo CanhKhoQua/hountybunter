@@ -76,4 +76,37 @@ describe('promoteJot', () => {
     await expect(promoteJot(j, { question: 'q', chosen: '' }, { env, timeZone: 'UTC' }))
       .rejects.toThrow(/chosen/)
   })
+
+  it('carries rejected options onto the note', async () => {
+    const note = await promoteJot(
+      await jot('bỏ CARTO'),
+      {
+        question: 'Which basemap?',
+        chosen: 'OpenFreeMap',
+        rejected: [{ option: 'CARTO', why_not: 'Request cap on the free tier' }],
+      },
+      { env, timeZone: 'UTC' },
+    )
+    expect(note.rejected).toEqual([{ option: 'CARTO', why_not: 'Request cap on the free tier' }])
+
+    const written = await readFile(join(home, 'notes', 'proj-a', `${note.id}.md`), 'utf8')
+    expect(written).toContain('CARTO')
+    expect(written).toContain('Request cap on the free tier')
+  })
+
+  it('carries evidence onto the note', async () => {
+    const note = await promoteJot(
+      await jot('anything'),
+      {
+        question: 'q',
+        chosen: 'c',
+        evidence: [{ kind: 'commit', ref: '99aee8c' }],
+      },
+      { env, timeZone: 'UTC' },
+    )
+    expect(note.evidence).toEqual([{ kind: 'commit', ref: '99aee8c' }])
+
+    const written = await readFile(join(home, 'notes', 'proj-a', `${note.id}.md`), 'utf8')
+    expect(written).toContain('99aee8c')
+  })
 })

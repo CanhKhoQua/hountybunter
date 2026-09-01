@@ -64,3 +64,34 @@ export function listNotes(
     )
     .all(...params) as NoteHit[]
 }
+
+export interface SessionHit {
+  id: string
+  project: string
+  started_at: string | null
+  title: string | null
+  activities: number
+}
+
+export function listSessions(
+  db: Database.Database,
+  opts: { project?: string; limit?: number } = {},
+): SessionHit[] {
+  const params: unknown[] = []
+  if (opts.project) params.push(opts.project)
+  params.push(opts.limit ?? 20)
+
+  // SQLite sorts NULL below every value, so DESC already places a session with no
+  // observed timestamp last. It is still listed: an absent signal is shown as
+  // absent, never as a session that did not happen.
+  return db
+    .prepare(
+      `SELECT s.id, s.project, s.started_at, s.title,
+              (SELECT COUNT(*) FROM activities a WHERE a.session_id = s.id) AS activities
+       FROM sessions s
+       ${opts.project ? 'WHERE s.project = ?' : ''}
+       ORDER BY s.started_at DESC, s.id ASC
+       LIMIT ?`,
+    )
+    .all(...params) as SessionHit[]
+}

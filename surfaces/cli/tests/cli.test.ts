@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { appendJot } from '@hountybunter/core'
+import { appendJot, openDb } from '@hountybunter/core'
 import { runCli, type Io } from '../src/bin.js'
 
 let out: string[]
@@ -180,4 +180,111 @@ describe('hostile input', () => {
       expect(message.length).toBeGreaterThan(0)
     })
   }
+})
+
+describe('hb sessions', () => {
+  function ingestedSession(id: string, project: string, startedAt: string, title: string) {
+    const db = openDb(io.env)
+    try {
+      db.prepare(
+        `INSERT INTO sessions (id, project, started_at, title, correlation)
+         VALUES (?, ?, ?, ?, 'exact')`,
+      ).run(id, project, startedAt, title)
+      db.prepare(`INSERT INTO activities (session_id, seq, kind) VALUES (?, 1, 'user')`).run(id)
+    } finally {
+      db.close()
+    }
+  }
+
+  it('says so plainly when nothing has been ingested', async () => {
+    expect(await runCli(['sessions'], io)).toBe(0)
+    expect(out.join('\n')).toMatch(/no sessions/i)
+  })
+
+  it('shows an ingested session with its date, activity count, and title', async () => {
+    ingestedSession('sess-1', 'proj-a', '2026-08-22T10:00:00.000Z', 'debt table rework')
+
+    expect(await runCli(['sessions'], io)).toBe(0)
+    const line = out.join('\n')
+    expect(line).toMatch(/2026-08-22/)
+    expect(line).toMatch(/debt table rework/)
+    expect(line).toMatch(/\b1\b/)
+    expect(line).toMatch(/sess-1/)
+  })
+
+  it('filters by project', async () => {
+    ingestedSession('sess-1', 'proj-a', '2026-08-22T10:00:00.000Z', 'kept')
+    ingestedSession('sess-2', 'proj-b', '2026-08-23T10:00:00.000Z', 'dropped')
+
+    expect(await runCli(['sessions', '--project', 'proj-a'], io)).toBe(0)
+    expect(out.join('\n')).toMatch(/kept/)
+    expect(out.join('\n')).not.toMatch(/dropped/)
+  })
+
+  it('reports a session that carries no title instead of printing undefined', async () => {
+    const db = openDb(io.env)
+    try {
+      db.prepare(
+        `INSERT INTO sessions (id, project, started_at, title, correlation)
+         VALUES ('sess-3', 'proj-a', '2026-08-22T10:00:00.000Z', NULL, 'exact')`,
+      ).run()
+    } finally {
+      db.close()
+    }
+
+    expect(await runCli(['sessions'], io)).toBe(0)
+    expect(out.join('\n')).not.toMatch(/undefined|null/)
+  })
+})
+
+describe('hb promote --rejected and --evidence', () => {
+  async function promote(...extra: string[]) {
+    await runCli(['jot', 'bỏ CARTO lấy OpenFreeMap'], io)
+    return runCli(
+      ['promote', '1', '--question', 'Which basemap?', '--chosen', 'OpenFreeMap', ...extra],
+      io,
+    )
+  }
+
+  it('records a rejected option written as `option :: why not`', async () => {
+    expect(await promote('--rejected', 'CARTO :: request cap on the free tier')).toBe(0)
+
+    out.length = 0
+    expect(await runCli(['search', 'request cap'], io)).toBe(0)
+    expect(out.join('\n')).toMatch(/Which basemap\?/)
+  })
+
+  it('records more than one rejected option', async () => {
+    expect(await promote(
+      '--rejected', 'CARTO :: request cap',
+      '--rejected', 'Mapbox :: needs a paid key',
+    )).toBe(0)
+
+    out.length = 0
+    await runCli(['search', 'paid key'], io)
+    expect(out.join('\n')).toMatch(/Which basemap\?/)
+  })
+
+  it('explains the syntax when the separator is missing instead of guessing', async () => {
+    expect(await promote('--rejected', 'CARTO was too slow')).toBe(1)
+    expect(err.join('\n')).toMatch(/::/)
+  })
+
+  it('records evidence written as `kind:ref`', async () => {
+    expect(await promote('--evidence', 'commit:99aee8c')).toBe(0)
+
+    out.length = 0
+    expect(await runCli(['list'], io)).toBe(0)
+    expect(out.join('\n')).toMatch(/Which basemap\?/)
+  })
+
+  it('rejects an evidence kind that is not one of the four', async () => {
+    expect(await promote('--evidence', 'tweet:12345')).toBe(1)
+    expect(err.join('\n')).toMatch(/file|commit|session|url/)
+  })
+
+  it('rejects evidence with no ref', async () => {
+    expect(await promote('--evidence', 'commit:')).toBe(1)
+    expect(err.join('\n').length).toBeGreaterThan(0)
+  })
 })

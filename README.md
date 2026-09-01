@@ -8,10 +8,13 @@ and Claude Code transcript ingest. No UI yet.**
 ## What it does today
 
     hb jot chose SQLite over Postgres because the file outlives the tool
-    hb promote 1 --question "Which database?" --chosen "SQLite"
+    hb promote 1 --question "Which database?" --chosen "SQLite" \
+        --rejected "Postgres :: a server to run for a single-user tool" \
+        --evidence commit:a931e2e
     hb search idempotency
     hb list --status standing
     hb ingest
+    hb sessions
     hb rebuild --verify
 
 Notes are markdown files under `~/.hountybunter/notes/`. The SQLite index is

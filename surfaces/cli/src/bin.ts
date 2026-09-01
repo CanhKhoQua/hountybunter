@@ -1,16 +1,21 @@
 import { parseArgs } from 'node:util'
 import {
+  EVIDENCE_KINDS,
   appendJot,
+  calendarDate,
   indexNote,
   listNotes,
+  listSessions,
   openDb,
   projectSlug,
   promoteJot,
   readJots,
   rebuildFromDisk,
+  resolveTimeZone,
   searchNotes,
   snapshotState,
 } from '@hountybunter/core'
+import type { Evidence, EvidenceKind, RejectedOption } from '@hountybunter/core'
 import { ingestAll } from '@hountybunter/adapter-claude-code'
 
 export interface Io {
@@ -25,9 +30,12 @@ const USAGE = `usage: hb <command>
   jot <text...>                       capture one line for the current project
   jots [--limit N]                    list captured jots with their promote positions
   promote <n> --question Q --chosen C [--title T]   n = position in the full list, oldest first
+              [--rejected 'option :: why not']      repeatable
+              [--evidence kind:ref]                 kind = file | commit | session | url, repeatable
   search <query> [--project P] [--limit N]
   list [--project P] [--status S] [--limit N]
   ingest                              read new Claude Code transcript lines
+  sessions [--project P] [--limit N]  list ingested sessions, newest first
   rebuild [--verify]                  rebuild the index from disk`
 
 /** Parse a numeric CLI option, or explain precisely what was wrong with it. */
@@ -50,6 +58,7 @@ export async function runCli(argv: string[], io: Io): Promise<number> {
       case 'search': return await cmdSearch(rest, io)
       case 'list': return await cmdList(rest, io)
       case 'ingest': return await cmdIngest(io)
+      case 'sessions': return await cmdSessions(rest, io)
       case 'rebuild': return await cmdRebuild(rest, io)
       default:
         io.err(USAGE)
@@ -81,6 +90,37 @@ async function cmdJot(args: string[], io: Io): Promise<number> {
   return 0
 }
 
+/**
+ * `option :: why not`. A doubled colon is chosen because prose about a rejected
+ * option routinely contains a single one ("reason: it was slow").
+ */
+function parseRejected(values: string[] | undefined): RejectedOption[] {
+  return (values ?? []).map((raw) => {
+    const parts = raw.split('::')
+    const option = parts[0]?.trim() ?? ''
+    const why_not = parts.slice(1).join('::').trim()
+    if (parts.length < 2 || !option || !why_not) {
+      throw new Error(`--rejected needs \`option :: why not\` — got "${raw}"`)
+    }
+    return { option, why_not }
+  })
+}
+
+/** `kind:ref`. Split on the first colon only, so a url ref keeps its own. */
+function parseEvidence(values: string[] | undefined): Evidence[] {
+  return (values ?? []).map((raw) => {
+    const at = raw.indexOf(':')
+    const kind = at < 0 ? '' : raw.slice(0, at).trim()
+    const ref = at < 0 ? '' : raw.slice(at + 1).trim()
+    if (!ref || !EVIDENCE_KINDS.includes(kind as EvidenceKind)) {
+      throw new Error(
+        `--evidence needs \`kind:ref\` with kind one of ${EVIDENCE_KINDS.join(', ')} — got "${raw}"`,
+      )
+    }
+    return { kind: kind as EvidenceKind, ref }
+  })
+}
+
 async function cmdPromote(args: string[], io: Io): Promise<number> {
   const { values, positionals } = parseArgs({
     args,
@@ -89,6 +129,8 @@ async function cmdPromote(args: string[], io: Io): Promise<number> {
       question: { type: 'string' },
       chosen: { type: 'string' },
       title: { type: 'string' },
+      rejected: { type: 'string', multiple: true },
+      evidence: { type: 'string', multiple: true },
     },
   })
 
@@ -115,7 +157,13 @@ async function cmdPromote(args: string[], io: Io): Promise<number> {
 
   const note = await promoteJot(
     jot,
-    { question: values.question, chosen: values.chosen, title: values.title },
+    {
+      question: values.question,
+      chosen: values.chosen,
+      title: values.title,
+      rejected: parseRejected(values.rejected),
+      evidence: parseEvidence(values.evidence),
+    },
     { env: io.env, timeZone: io.env.HOUNTYBUNTER_TZ },
   )
 
@@ -246,4 +294,34 @@ async function cmdRebuild(args: string[], io: Io): Promise<number> {
     io.out('verified: a second rebuild produced identical state')
   }
   return report.errors.length > 0 ? 1 : 0
+}
+
+async function cmdSessions(args: string[], io: Io): Promise<number> {
+  const { values } = parseArgs({
+    args,
+    options: { project: { type: 'string' }, limit: { type: 'string' } },
+  })
+
+  const db = openDb(io.env)
+  try {
+    const hits = listSessions(db, {
+      project: values.project,
+      limit: positiveInt(values.limit, '--limit'),
+    })
+    if (hits.length === 0) {
+      io.out('no sessions yet — run `hb ingest` first')
+      return 0
+    }
+    const timeZone = resolveTimeZone(io.env)
+    for (const hit of hits) {
+      // A session with no observed timestamp is dated `undated` rather than
+      // silently borrowing today's date, matching how an absent HP signal is
+      // shown as absent.
+      const date = hit.started_at ? calendarDate(hit.started_at, timeZone) : 'undated'
+      io.out(`${date}  ${hit.id}  ${hit.activities} acts  ${hit.title ?? '(untitled)'}`)
+    }
+    return 0
+  } finally {
+    db.close()
+  }
 }
