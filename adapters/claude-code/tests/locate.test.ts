@@ -9,7 +9,7 @@ let home: string
 
 beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), 'hb-cc-'))
-  env = { HOME: home } as NodeJS.ProcessEnv
+  env = { HOME: home, HOUNTYBUNTER_HOME: home } as NodeJS.ProcessEnv
 })
 
 describe('transcriptRoot', () => {
@@ -30,7 +30,9 @@ describe('findTranscripts', () => {
   })
 
   it('finds jsonl files and reads the session id from the filename', async () => {
-    const dir = join(home, '.claude', 'projects', '-Users-kobe-proj')
+    // The store's archive, not the agent's directory: findTranscripts is what
+    // ingest walks, and it must keep finding a session the agent has dropped.
+    const dir = join(home, 'transcripts', '-Users-kobe-proj')
     await mkdir(dir, { recursive: true })
     await writeFile(join(dir, 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jsonl'), '')
 
@@ -41,7 +43,7 @@ describe('findTranscripts', () => {
   })
 
   it('ignores non-jsonl files', async () => {
-    const dir = join(home, '.claude', 'projects', '-p')
+    const dir = join(home, 'transcripts', '-p')
     await mkdir(dir, { recursive: true })
     await writeFile(join(dir, 'notes.md'), '')
     expect(await findTranscripts(env)).toEqual([])

@@ -36,6 +36,16 @@ export function jotsDir(env: NodeJS.ProcessEnv = process.env): string {
   return join(storeRoot(env), 'jots')
 }
 
+/**
+ * Durable copies of the agent's session transcripts. A transcript cannot be
+ * regenerated once the agent deletes it — Claude Code drops them after
+ * `cleanupPeriodDays`, 30 by default — so it is a file in the store, not a row
+ * in the index.
+ */
+export function transcriptsDir(env: NodeJS.ProcessEnv = process.env): string {
+  return join(storeRoot(env), 'transcripts')
+}
+
 export function dbPath(env: NodeJS.ProcessEnv = process.env): string {
   return join(storeRoot(env), 'index.db')
 }

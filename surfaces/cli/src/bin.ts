@@ -17,7 +17,7 @@ import {
   snapshotState,
 } from '@hountybunter/core'
 import type { Evidence, EvidenceKind, RejectedOption } from '@hountybunter/core'
-import { ingestAll } from '@hountybunter/adapter-claude-code'
+import { ingestAll, syncArchive } from '@hountybunter/adapter-claude-code'
 import { serve } from '@hountybunter/web'
 
 export interface Io {
@@ -274,6 +274,12 @@ async function cmdList(args: string[], io: Io): Promise<number> {
 async function cmdIngest(io: Io): Promise<number> {
   const db = openDb(io.env)
   try {
+    // Copy before reading. The agent deletes its transcripts on a 30-day clock,
+    // so a run that only indexed them would be the last chance to see them.
+    const archived = await syncArchive(io.env, db)
+    if (archived.bytesCopied > 0) {
+      io.out(`archived ${archived.bytesCopied} bytes from ${archived.files} transcripts`)
+    }
     const report = await ingestAll(db, io.env)
     const spooled = await replaySpool(db, io.env)
     if (spooled.replayed > 0 || spooled.skipped > 0) {

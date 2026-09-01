@@ -1,5 +1,6 @@
 export * from './parse-line.js'
 export * from './locate.js'
 export * from './cursor.js'
+export * from './archive.js'
 export * from './ingest.js'
 export * from './spawn.js'
