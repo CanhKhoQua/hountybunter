@@ -10,6 +10,8 @@
     "@xterm/xterm": "^5.5.0"
   },
   "devDependencies": {
-    "@testing-library/user-event": "^14.6.6"
+    "@tailwindcss/vite": "^4.3.3",
+    "@testing-library/user-event": "^14.6.6",
+    "tailwindcss": "^4.3.3"
   }
 }

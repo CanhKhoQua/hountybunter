@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react'
+import { BUTTON, FIELD, MUTED } from '../ui/styles.js'
 import { slugify } from '../slug.js'
 
 export function RecordForm({
@@ -50,35 +51,35 @@ export function RecordForm({
   }
 
   return (
-    <form className="record-form" onSubmit={submit}>
-      <label>
+    <form className="flex max-w-160 flex-col gap-2" onSubmit={submit}>
+      <label className="flex flex-col gap-1">
         What was the question?
-        <input value={question} onChange={(e) => setQuestion(e.target.value)} />
+        <input className={FIELD} value={question} onChange={(e) => setQuestion(e.target.value)} />
       </label>
 
-      <label>
+      <label className="flex flex-col gap-1">
         What did you choose?
-        <input value={chosen} onChange={(e) => setChosen(e.target.value)} />
+        <input className={FIELD} value={chosen} onChange={(e) => setChosen(e.target.value)} />
       </label>
 
-      <label>
+      <label className="flex flex-col gap-1">
         What lost?
-        <input value={option} onChange={(e) => setOption(e.target.value)} />
+        <input className={FIELD} value={option} onChange={(e) => setOption(e.target.value)} />
       </label>
 
-      <label>
+      <label className="flex flex-col gap-1">
         Why did it lose?
-        <input value={whyNot} onChange={(e) => setWhyNot(e.target.value)} />
+        <input className={FIELD} value={whyNot} onChange={(e) => setWhyNot(e.target.value)} />
       </label>
 
-      <div className="form-foot">
-        <button type="submit" disabled={!ready || saving}>
+      <div className="flex items-center gap-2.5">
+        <button type="submit" className={BUTTON} disabled={!ready || saving}>
           {saving ? 'Recording…' : 'Record'}
         </button>
-        {preview ? <span className="preview">{preview}</span> : null}
+        {preview ? <span className={MUTED}>{preview}</span> : null}
       </div>
 
-      {error ? <p className="error">Could not record it: {error}</p> : null}
+      {error ? <p className="text-red-700">Could not record it: {error}</p> : null}
     </form>
   )
 }

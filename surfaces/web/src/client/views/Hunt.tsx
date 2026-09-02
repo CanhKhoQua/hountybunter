@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
 import { api, type HuntRow } from '../api.js'
+import { BADGE, BUTTON, FIELD, MUTED } from '../ui/styles.js'
 
 /**
  * A live agent session, in a real terminal.
@@ -82,7 +83,7 @@ export function Hunt() {
   if (!hunt) {
     return (
       <form
-        className="hunt-start"
+        className="flex max-w-160 flex-col gap-2"
         onSubmit={(event) => {
           event.preventDefault()
           setError(null)
@@ -95,37 +96,44 @@ export function Hunt() {
         <label htmlFor="hunt-cwd">Working directory</label>
         <input
           id="hunt-cwd"
+          className={FIELD}
           value={cwd}
           onChange={(event) => setCwd(event.target.value)}
           placeholder="/Users/you/project"
         />
-        <button type="submit" disabled={!cwd.trim()}>
+        <button type="submit" className={BUTTON} disabled={!cwd.trim()}>
           Start a hunt
         </button>
-        {error ? <p className="error">{error}</p> : null}
+        {error ? <p className="text-red-700">{error}</p> : null}
       </form>
     )
   }
 
   return (
-    <div className="hunt">
-      <p className="hunt-meta">
-        <code>{hunt.command}</code> in <code>{hunt.cwd}</code>
+    <div className="flex h-full min-h-0 flex-col gap-1.5">
+      <p className={`m-0 text-[13px] ${MUTED}`}>
+        <code className="text-ink">{hunt.command}</code> in{' '}
+        <code className="text-ink">{hunt.cwd}</code>
         {exit === null ? null : <strong> · exited with {exit}</strong>}
       </p>
-      <p className="hunt-binding">
+      <p className={`m-0 flex items-center gap-2 text-[13px] ${MUTED}`}>
         {binding ? (
           <>
-            session <code>{binding.sessionId}</code>
+            session <code className="text-ink">{binding.sessionId}</code>
             {/* Only a guess is labelled. Certainty needs no badge, and a guess
                 must never be shown as anything else. */}
-            {binding.correlation === 'guessed' ? <span className="badge">guessed</span> : null}
+            {binding.correlation === 'guessed' ? <span className={BADGE}>guessed</span> : null}
           </>
         ) : (
           'not bound to a transcript yet'
         )}
       </p>
-      <div className="terminal" ref={host} />
+      {/*
+        A real box to measure. xterm's fit addon reads this element's size;
+        without a height it computes a nonsense grid, so `min-h-80 flex-1` is
+        load-bearing, not decoration.
+      */}
+      <div className="min-h-80 flex-1 rounded border border-line bg-[#101010] p-2" ref={host} />
     </div>
   )
 }

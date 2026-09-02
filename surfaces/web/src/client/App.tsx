@@ -25,13 +25,23 @@ export function App() {
   const [menuOpen, setMenuOpen] = useState(true)
 
   return (
-    <div className={`app${menuOpen ? '' : ' menu-collapsed'}`}>
+    <div
+      className={
+        'grid h-screen transition-[grid-template-columns] duration-150 ' +
+        (menuOpen ? 'grid-cols-[var(--spacing-menu)_1fr]' : 'grid-cols-[0_1fr]')
+      }
+    >
       <Menu current={view} onSelect={setView} />
 
       {/* Collapsed, never unmounted: this tab is the only way back. */}
       <button
         type="button"
-        className="menu-tab"
+        className={
+          'fixed top-1/2 z-2 -mt-5.5 h-11 w-4.5 cursor-pointer rounded-r ' +
+          'border border-l-0 border-line bg-raised text-ink-soft ' +
+          'transition-[left] duration-150 ' +
+          (menuOpen ? 'left-[var(--spacing-menu)]' : 'left-0')
+        }
         aria-label={menuOpen ? 'Collapse menu' : 'Expand menu'}
         aria-expanded={menuOpen}
         onClick={() => setMenuOpen((open) => !open)}
@@ -39,16 +49,20 @@ export function App() {
         {menuOpen ? '‹' : '›'}
       </button>
 
-      <main className="main">
-        <div className="stage-wrap" />
-        <section className="panel">
-          <h2>{TITLES[view]}</h2>
+      <main className="flex min-w-0 flex-col overflow-hidden">
+        {/* The scene band. A plain panel until phase 7; the layout must survive
+            never getting art, so it is capped rather than sized by content. */}
+        <div className="max-h-[22vh] shrink-0" />
+        <section className="min-h-0 flex-1 overflow-auto px-6 pt-4 pb-8">
+          <h2 className="mb-4 text-[15px] font-semibold tracking-wide uppercase text-ink-soft">
+            {TITLES[view]}
+          </h2>
           {view === 'hunt' ? <Hunt /> : null}
           {view === 'sessions' ? <Sessions timeZone={TIME_ZONE} /> : null}
           {view === 'notes' ? <Notes /> : null}
           {view === 'regions' ? <Regions /> : null}
           {view === 'bounties' ? (
-            <p className="empty">
+            <p className="py-3 text-ink-soft">
               Phase 8, not built. Until then GitHub issues are the source of truth, and a
               note can point at one with evidence of kind <code>url</code>.
             </p>
