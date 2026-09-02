@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { clearSessionIndex } from '../src/db/write.js'
 import { openDb } from '../src/db/open.js'
 import { dbPath } from '../src/paths.js'
-import { rebuildFromDisk, snapshotState } from '../src/rebuild.js'
+import { NOT_SNAPSHOTTED, SNAPSHOT, rebuildFromDisk, snapshotState } from '../src/rebuild.js'
 
 let env: NodeJS.ProcessEnv
 let home: string
@@ -111,6 +111,74 @@ describe('rebuildFromDisk', () => {
     const after = snapshotState(openDb(env))
 
     expect(after).not.toBe(before)
+  })
+})
+
+describe('the snapshot covers the whole index', () => {
+  it('accounts for every column of every table, one way or the other', () => {
+    // `--verify` compares two rebuilds by comparing their snapshots, so a
+    // column the snapshot does not read is a column two rebuilds can disagree
+    // about while reporting identical state. That has happened twice already:
+    // the keystone test once omitted notes.path, and sessions.parent_id
+    // shipped this morning without being added here.
+    //
+    // Nothing is allowed to be merely forgotten. Every column is either in the
+    // snapshot, or in NOT_SNAPSHOTTED with a reason someone had to type.
+    const db = openDb(env)
+    try {
+      const tables = (
+        db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as {
+          name: string
+        }[]
+      ).map((row) => row.name)
+
+      const unaccounted: string[] = []
+      for (const table of tables) {
+        if (NOT_SNAPSHOTTED[table]) continue
+        if (!SNAPSHOT[table]) {
+          unaccounted.push(table)
+          continue
+        }
+        const columns = (
+          db.prepare('SELECT name FROM pragma_table_info(?)').all(table) as { name: string }[]
+        ).map((row) => row.name)
+        for (const column of columns) {
+          if (SNAPSHOT[table]!.columns.includes(column)) continue
+          if (NOT_SNAPSHOTTED[`${table}.${column}`]) continue
+          unaccounted.push(`${table}.${column}`)
+        }
+      }
+
+      expect(unaccounted).toEqual([])
+    } finally {
+      db.close()
+    }
+  })
+
+  it('gives a reason for everything it leaves out', () => {
+    // The reason is the point. An empty string would turn this into a list of
+    // names to append to, which is the forgetting it exists to prevent.
+    for (const [what, why] of Object.entries(NOT_SNAPSHOTTED)) {
+      expect(why.length, `${what} needs a reason, not a placeholder`).toBeGreaterThan(20)
+    }
+  })
+
+  it('reads only columns that exist', () => {
+    // The other direction: a renamed or dropped column would leave the
+    // snapshot selecting something gone, and fail at query time instead.
+    const db = openDb(env)
+    try {
+      for (const [table, spec] of Object.entries(SNAPSHOT)) {
+        const columns = (
+          db.prepare('SELECT name FROM pragma_table_info(?)').all(table) as { name: string }[]
+        ).map((row) => row.name)
+        for (const column of spec.columns) {
+          expect(columns, `${table}.${column}`).toContain(column)
+        }
+      }
+    } finally {
+      db.close()
+    }
   })
 })
 
