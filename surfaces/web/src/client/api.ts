@@ -86,6 +86,7 @@ export const api = {
   regions: () => get<{ regions: RegionRow[] }>('/api/regions'),
   /** Opens the desktop folder chooser. `path` is null when it was cancelled. */
   browse: () => post<{ path: string | null }>('/api/browse', {}),
+  hunts: () => get<{ hunts: HuntRow[] }>('/api/hunts'),
   hunt: (id: string) => get<{ hunt: HuntRow }>(`/api/hunts/${encodeURIComponent(id)}`),
   startHunt: (cwd: string) => post<{ hunt: HuntRow }>('/api/hunts', { cwd: cwd.trim() }),
   sendInput: (id: string, data: string) =>

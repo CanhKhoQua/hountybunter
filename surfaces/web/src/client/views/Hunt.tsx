@@ -57,6 +57,25 @@ export function Hunt({ timeZone }: { timeZone: string }) {
   }
 
   useEffect(() => {
+    // Leaving this view unmounts it and the terminal goes with it, but the
+    // agent does not: the server holds the process and replays its last output
+    // to a new subscriber. So on arrival, ask what is still running rather than
+    // offering to start something — a session that is alive must not be shown
+    // as gone. This also covers a reload and a second tab, which keeping the
+    // component mounted would not.
+    api
+      .hunts()
+      .then((data) => {
+        const live = data.hunts
+          .filter((row) => row.exitCode === null && row.killedAt === null)
+          // Newest, when more than one is running: the one just left behind.
+          .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
+        if (live[0]) setHunt(live[0])
+      })
+      .catch(() => undefined)
+  }, [])
+
+  useEffect(() => {
     if (!hunt) return
     const element = host.current
     if (!element) return

@@ -46,8 +46,11 @@ const REGIONS = [
 /** What the desktop chooser answered, or null for a cancelled dialog. */
 let chosen: string | null = '/home/Developer/hountybunter'
 
+/** What `GET /api/hunts` reports: hunts the server still holds. */
+let running: unknown[] = []
+
 function answer(url: string) {
-  if (url === '/api/hunts') return { hunts: [] }
+  if (url === '/api/hunts') return { hunts: running }
   if (url === '/api/regions') return { regions: REGIONS }
   if (url.startsWith('/api/hunts/')) return { hunt: HUNT }
   return {}
@@ -57,6 +60,7 @@ beforeEach(() => {
   // Reset, or one test cancelling the dialog decides what every later test
   // sees — a pass that depends on file order proves nothing.
   chosen = '/home/Developer/hountybunter'
+  running = []
   written = []
   onDataHandlers = []
   FakeEventSource.last = null
@@ -102,6 +106,42 @@ async function startHunt() {
 
 
 describe('Hunt', () => {
+  it('attaches to a hunt that is still running when it opens', async () => {
+    // Switching to another view unmounts this one, and the terminal goes with
+    // it. The agent does not: the server holds the process and replays its
+    // last output to a new subscriber. Coming back showed the start form,
+    // which reads as a session that died when it is still there.
+    running = [HUNT]
+    render(<Hunt timeZone="UTC" />)
+
+    await waitFor(() => expect(FakeEventSource.last).not.toBe(null))
+    expect(FakeEventSource.last!.url).toBe('/api/hunts/hunt-1/stream')
+    expect(screen.queryByLabelText(/directory/i)).toBe(null)
+  })
+
+  it('does not attach to a hunt that has exited', async () => {
+    // Death is a state the registry keeps on purpose, so a finished hunt is
+    // still listed. Re-attaching to one would show a terminal nothing writes
+    // to and hide the way to start another.
+    running = [{ ...HUNT, exitCode: 0 }]
+    render(<Hunt timeZone="UTC" />)
+
+    expect(await screen.findByLabelText(/directory/i)).toBeTruthy()
+    expect(FakeEventSource.last).toBe(null)
+  })
+
+  it('attaches to the newest of several live hunts', async () => {
+    running = [
+      { ...HUNT, id: 'older', startedAt: '2026-09-01T09:00:00.000Z' },
+      { ...HUNT, id: 'newest', startedAt: '2026-09-01T11:00:00.000Z' },
+      { ...HUNT, id: 'middle', startedAt: '2026-09-01T10:00:00.000Z' },
+    ]
+    render(<Hunt timeZone="UTC" />)
+
+    await waitFor(() => expect(FakeEventSource.last).not.toBe(null))
+    expect(FakeEventSource.last!.url).toBe('/api/hunts/newest/stream')
+  })
+
   it('fills the field from the desktop chooser', async () => {
     // Browse is one button and one dialog. A page cannot learn the absolute
     // path of a directory a person picks, so the server opens the chooser.
