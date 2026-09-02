@@ -1,4 +1,4 @@
-import { mkdtemp, readFile } from 'node:fs/promises'
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
@@ -80,6 +80,27 @@ describe('GET /api/regions', () => {
     expect(res.body.regions).toEqual([
       { project: 'proj-a', sessions: 1, notes: 1, path: null, name: null, lastSeenAt: null },
     ])
+  })
+})
+
+describe('GET /api/health', () => {
+  it('answers whether hooks are arriving, or parked, or absent', async () => {
+    // Three different situations look identical from hook_events alone, and
+    // the store cannot say which without being asked about the spool too.
+    const res = await handle('GET', '/api/health', null, env)
+
+    expect(res.status).toBe(200)
+    expect(res.body).toEqual({ hookEvents: 0, spooled: 0, hunts: 0 })
+  })
+
+  it('counts the events a hook parked while nothing was listening', async () => {
+    await writeFile(
+      join(env.HOUNTYBUNTER_HOME!, 'spool.jsonl'),
+      `${JSON.stringify({ hook_event_name: 'Stop', session_id: 's9', cwd: '/w' })}\n`,
+    )
+
+    const res = await handle('GET', '/api/health', null, env)
+    expect(res.body.spooled).toBe(1)
   })
 })
 

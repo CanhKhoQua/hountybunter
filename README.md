@@ -60,6 +60,33 @@ The hooks never block your session: every path exits 0, every network call is
 time-bounded, and an event that cannot be delivered is parked in
 `~/.hountybunter/spool.jsonl` for the next `hb ingest`.
 
+## What the local port can do
+
+`hb web` binds `127.0.0.1` and has no authentication, deliberately: it is one
+person's tool on their own machine. Worth knowing what that means before
+running it anywhere less private than a laptop.
+
+- The UI shows **everything in the store** — prompts, tool inputs and outputs,
+  file paths, branch names. Anything a session touched is readable.
+- `POST /api/hunts` **starts an agent process** in a directory you name. The
+  binary is the server's (`HOUNTYBUNTER_AGENT_CMD`, default `claude`) and never
+  the request's, so the port cannot be talked into running something else — but
+  it can run that one thing.
+- `POST /api/browse` **opens a folder dialog on the desktop**, because a
+  browser is never told the absolute path of a directory a person picks.
+
+So anything that can reach the port can read your sessions and start an agent.
+Do not forward it, and do not bind it where someone else can reach it.
+
+To check whether the observing half is working at all:
+
+    curl -s http://127.0.0.1:$(cat ~/.hountybunter/port)/api/health
+
+`hookEvents` counts events that arrived, `spooled` counts events a hook parked
+because nothing was listening, and `hunts` counts agent processes this server
+holds. Zero of the first two means the plugin is not installed — not that
+nothing happened.
+
 ## Requirements
 
 Node 20 or later.

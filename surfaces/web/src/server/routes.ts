@@ -4,6 +4,7 @@ import {
   indexNote,
   listActivities,
   listNotes,
+  countSpooled,
   listRegions,
   listSessions,
   openDb,
@@ -152,6 +153,20 @@ export async function handle(
 
     if (path === '/api/regions') {
       return { status: 200, body: { regions: listRegions(db) } }
+    }
+
+    // Whether the observing half is working at all. `hook_events` alone cannot
+    // say: zero means the plugin is not installed, or the server was down and
+    // events are waiting, or nothing has happened yet. The spool separates the
+    // second from the other two, and it was going uncounted.
+    if (path === '/api/health') {
+      const hookEvents = (
+        db.prepare('SELECT COUNT(*) n FROM hook_events').get() as { n: number }
+      ).n
+      return {
+        status: 200,
+        body: { hookEvents, spooled: await countSpooled(env), hunts: hunts.list().length },
+      }
     }
 
 

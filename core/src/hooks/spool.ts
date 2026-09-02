@@ -9,6 +9,25 @@ export interface SpoolReport {
 }
 
 /**
+ * How many events are parked right now.
+ *
+ * An empty `hook_events` has three possible causes — the plugin is not
+ * installed, the server was down and events are waiting, or nothing has
+ * happened yet — and they are indistinguishable without this. The spool is
+ * what tells them apart, and nothing was counting it.
+ */
+export async function countSpooled(env: NodeJS.ProcessEnv = process.env): Promise<number> {
+  let text: string
+  try {
+    text = await readFile(spoolFile(env), 'utf8')
+  } catch {
+    // No spool is the normal state, not a problem to report.
+    return 0
+  }
+  return text.split('\n').filter((line) => line.trim()).length
+}
+
+/**
  * Bring in events a hook parked while nothing was listening.
  *
  * Safe to run at any time: `receiveHookEvent` is idempotent on the whole
