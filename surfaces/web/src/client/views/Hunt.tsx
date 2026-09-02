@@ -20,11 +20,22 @@ import { BACK, BADGE, BUTTON, FIELD, MUTED, TALLY } from '../ui/styles.js'
 const PLACE =
   'grid w-full grid-cols-[minmax(0,1fr)_auto] items-baseline gap-2.5 ' +
   'cursor-pointer border-0 border-b border-line bg-transparent px-1.5 py-2 ' +
-  'text-left font-[inherit] text-inherit hover:bg-raised'
+  'text-left font-[inherit] text-inherit hover:bg-raised ' +
+  'focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent'
+
+/** `--color-pit` from app.css, which xterm cannot read for itself. */
+const PIT = '#14120f'
+
+/** Quiet, but bordered in warn: stopping an agent is not an idle click. */
+const STOP = `${BACK} border-warn text-warn`
+
+/** How many places are worth calling recent before the list needs asking for. */
+const RECENT = 8
 
 export function Hunt({ timeZone }: { timeZone: string }) {
   const [cwd, setCwd] = useState('')
   const [grounds, setGrounds] = useState<RegionRow[]>([])
+  const [showAllGrounds, setShowAllGrounds] = useState(false)
   const [hunt, setHunt] = useState<HuntRow | null>(null)
   const [binding, setBinding] = useState<HuntRow['binding']>(null)
   const [exit, setExit] = useState<number | null>(null)
@@ -80,7 +91,17 @@ export function Hunt({ timeZone }: { timeZone: string }) {
     const element = host.current
     if (!element) return
 
-    const term = new Terminal({ convertEol: false, fontSize: 13, cursorBlink: true })
+    const term = new Terminal({
+      convertEol: false,
+      fontSize: 13,
+      cursorBlink: true,
+      // xterm paints its own background over the element it is opened in, so
+      // the wrapper's colour was never the one on screen — only its padding
+      // frame showed. It parses colours itself and cannot read a custom
+      // property, so `--color-pit` is repeated here and a test holds the two
+      // together.
+      theme: { background: PIT, foreground: '#ece8e3' },
+    })
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.open(element)
@@ -144,6 +165,21 @@ export function Hunt({ timeZone }: { timeZone: string }) {
       .catch((cause: Error) => setError(cause.message))
   }
 
+  // Signalled, not assumed dead: the exit arrives on the stream like any other,
+  // so the terminal keeps whatever the agent says on its way out.
+  const stop = () => {
+    if (!hunt) return
+    setError(null)
+    api.stopHunt(hunt.id).catch((cause: Error) => setError(cause.message))
+  }
+
+  /** Lets go of a hunt that has ended, which is the only way back to the form. */
+  const dismiss = () => {
+    setHunt(null)
+    setExit(null)
+    setBinding(null)
+  }
+
   if (!hunt) {
     const target = cwd.trim().replace(/\/+$/, '')
     const named = target.slice(target.lastIndexOf('/') + 1)
@@ -175,22 +211,33 @@ export function Hunt({ timeZone }: { timeZone: string }) {
             <button type="button" className={BACK} onClick={browse}>
               Browse…
             </button>
-            <button type="submit" className={BUTTON} disabled={!target}>
-              {/* A control says what it does, and where. The path beside it is
-                  long enough to be read past. */}
-              {named ? `Start hunt in ${named}` : 'Start hunt'}
-            </button>
           </div>
         </div>
+
+        {/*
+          On its own line, not in the row above. The label carries the directory
+          name, so it grows a character at a time as the field is typed into —
+          sharing a row with the input made both jump on every keystroke.
+        */}
+        <button type="submit" className={BUTTON} disabled={!target}>
+          {/* A control says what it does, and where. The path beside it is long
+              enough to be read past. */}
+          {named ? `Start hunt in ${named}` : 'Start hunt'}
+        </button>
 
         {grounds.length > 0 ? (
           <div className="flex flex-col">
             <h2 className={`m-0 pb-1 text-[12px] uppercase tracking-wide ${MUTED}`}>
               Where you work
             </h2>
+            {/*
+              Capped rather than paged. This is a picker inside a form and it is
+              the *recent* list: page three of "recent" answers nobody's
+              question, and a long one would push the form off the screen.
+            */}
             {/* The app's own list row, not buttons: a screen of filled accent
                 bars leaves no primary action on it. */}
-            {grounds.map((ground) => (
+            {(showAllGrounds ? grounds : grounds.slice(0, RECENT)).map((ground) => (
               <button
                 key={ground.path}
                 type="button"
@@ -206,6 +253,16 @@ export function Hunt({ timeZone }: { timeZone: string }) {
                 </span>
               </button>
             ))}
+
+            {!showAllGrounds && grounds.length > RECENT ? (
+              <button
+                type="button"
+                className={`${BACK} mt-2 self-start`}
+                onClick={() => setShowAllGrounds(true)}
+              >
+                Show all {grounds.length} places
+              </button>
+            ) : null}
           </div>
         ) : null}
 
@@ -216,29 +273,62 @@ export function Hunt({ timeZone }: { timeZone: string }) {
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-1.5">
-      <p className={`m-0 text-[13px] ${MUTED}`}>
-        <code className="text-ink">{hunt.command}</code> in{' '}
-        <code className="text-ink">{hunt.cwd}</code>
-        {exit === null ? null : <strong> · exited with {exit}</strong>}
-      </p>
-      <p className={`m-0 flex items-center gap-2 text-[13px] ${MUTED}`}>
-        {binding ? (
-          <>
-            session <code className="text-ink">{binding.sessionId}</code>
-            {/* Only a guess is labelled. Certainty needs no badge, and a guess
-                must never be shown as anything else. */}
-            {binding.correlation === 'guessed' ? <span className={BADGE}>guessed</span> : null}
-          </>
-        ) : (
-          'not bound to a transcript yet'
-        )}
-      </p>
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <p className={`m-0 truncate text-[13px] ${MUTED}`}>
+            <code className="text-ink">{hunt.command}</code> in{' '}
+            <code className="text-ink">{hunt.cwd}</code>
+          </p>
+          <p className={`m-0 flex items-center gap-2 text-[13px] ${MUTED}`}>
+            {binding ? (
+              <>
+                session <code className="text-ink">{binding.sessionId}</code>
+                {/* Only a guess is labelled. Certainty needs no badge, and a
+                    guess must never be shown as anything else. */}
+                {binding.correlation === 'guessed' ? <span className={BADGE}>guessed</span> : null}
+              </>
+            ) : (
+              'not bound to a transcript yet'
+            )}
+          </p>
+        </div>
+
+        {/*
+          One control, and which one says which state this is in. Running, the
+          only thing worth offering is a way out — without it, killing the
+          server was the only way to stop an agent. Ended, the terminal is a
+          transcript nothing will write to again, and dismissing it is the only
+          way back to the form; there was none, so starting another meant
+          reloading the page.
+        */}
+        <div className="flex shrink-0 items-center gap-2">
+          {exit === null ? (
+            <button type="button" className={STOP} onClick={stop}>
+              Stop hunt
+            </button>
+          ) : (
+            <button type="button" className={BUTTON} onClick={dismiss}>
+              Start another hunt
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Said in a line of its own. Tucked into the end of the command line, in
+          the same muted grey, a process dying read as decoration. */}
+      {exit === null ? null : (
+        <p className="m-0 text-[13px] text-warn">
+          Exited with {exit}. What is below is what it left behind.
+        </p>
+      )}
+
+      {error ? <p className="m-0 text-[13px] text-warn">{error}</p> : null}
       {/*
         A real box to measure. xterm's fit addon reads this element's size;
         without a height it computes a nonsense grid, so `min-h-80 flex-1` is
         load-bearing, not decoration.
       */}
-      <div className="min-h-80 flex-1 rounded border border-line bg-[#101010] p-2" ref={host} />
+      <div className="min-h-80 flex-1 rounded border border-line bg-pit p-2" ref={host} />
     </div>
   )
 }

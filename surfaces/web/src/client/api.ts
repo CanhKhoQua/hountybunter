@@ -63,11 +63,12 @@ export interface HuntRow {
   binding: { sessionId: string; correlation: 'exact' | 'guessed' } | null
 }
 
-async function post<T>(path: string, body: unknown): Promise<T> {
+async function send<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(path, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
+    method,
+    ...(body === undefined
+      ? {}
+      : { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
   })
   if (!res.ok) {
     const detail = (await res.json().catch(() => null)) as { error?: string } | null
@@ -76,14 +77,45 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   return (res.status === 204 ? undefined : await res.json()) as T
 }
 
+const post = <T>(path: string, body: unknown) => send<T>('POST', path, body)
+
+/** The window a list is asked for. Omitted, the server serves its own default. */
+export interface Page {
+  limit: number
+  offset: number
+}
+
+/**
+ * `?limit&offset`, or nothing at all when no page was asked for. Callers that
+ * read a whole short list keep the bare path, which is also what keeps their
+ * requests recognisable.
+ */
+function pageQuery(page?: Page): string {
+  return page ? `?limit=${page.limit}&offset=${page.offset}` : ''
+}
+
 export const api = {
-  sessions: () => get<{ sessions: SessionRow[] }>('/api/sessions'),
-  session: (id: string) =>
-    get<{ session: SessionRow; activities: ActivityRow[] }>(`/api/sessions/${encodeURIComponent(id)}`),
-  notes: (query?: string) =>
-    get<{ notes: NoteHit[] }>(query ? `/api/notes?q=${encodeURIComponent(query)}` : '/api/notes'),
+  sessions: (page?: Page) =>
+    get<{ sessions: SessionRow[]; total: number }>(`/api/sessions${pageQuery(page)}`),
+  session: (id: string, page?: Page) =>
+    get<{ session: SessionRow; activities: ActivityRow[]; total: number }>(
+      `/api/sessions/${encodeURIComponent(id)}${pageQuery(page)}`,
+    ),
+  notes: (query?: string, page?: Page) => {
+    const params = new URLSearchParams()
+    if (query) params.set('q', query)
+    if (page) {
+      params.set('limit', String(page.limit))
+      params.set('offset', String(page.offset))
+    }
+    const search = params.toString()
+    // A search is ranked by relevance, so the server does not page it and
+    // sends no total. The plain list does both.
+    return get<{ notes: NoteHit[]; total?: number }>(`/api/notes${search ? `?${search}` : ''}`)
+  },
   note: (id: string) => get<{ note: Note }>(`/api/notes/${encodeURIComponent(id)}`),
-  regions: () => get<{ regions: RegionRow[] }>('/api/regions'),
+  regions: (page?: Page) =>
+    get<{ regions: RegionRow[]; total: number }>(`/api/regions${pageQuery(page)}`),
   /** Opens the desktop folder chooser. `path` is null when it was cancelled. */
   browse: () => post<{ path: string | null }>('/api/browse', {}),
   hunts: () => get<{ hunts: HuntRow[] }>('/api/hunts'),
@@ -93,6 +125,8 @@ export const api = {
     post<void>(`/api/hunts/${encodeURIComponent(id)}/input`, { data }),
   resizeHunt: (id: string, cols: number, rows: number) =>
     post<void>(`/api/hunts/${encodeURIComponent(id)}/resize`, { cols, rows }),
+  /** Signals the agent to stop. The registry keeps the hunt, marked killed. */
+  stopHunt: (id: string) => send<void>('DELETE', `/api/hunts/${encodeURIComponent(id)}`),
 }
 
 /**

@@ -34,6 +34,80 @@ beforeEach(async () => {
   }
 })
 
+describe('paging', () => {
+  /** Enough rows that a page is smaller than the list. */
+  async function bulk() {
+    const db = openDb(env)
+    try {
+      for (let i = 2; i <= 12; i += 1) {
+        db.prepare(
+          `INSERT INTO sessions (id, project, started_at, correlation)
+           VALUES (?, 'proj-a', ?, 'exact')`,
+        ).run(`s${i}`, `2026-08-${String(i).padStart(2, '0')}T10:00:00.000Z`)
+      }
+      for (let seq = 2; seq <= 12; seq += 1) {
+        db.prepare(`INSERT INTO activities (session_id, seq, kind) VALUES ('s1', ?, 'user')`).run(
+          seq,
+        )
+      }
+    } finally {
+      db.close()
+    }
+  }
+
+  it('reports the whole count beside the page it served', async () => {
+    // Without this the client cannot tell a short list from a truncated one,
+    // which is exactly how a session of thousands came to show its first 500
+    // in silence.
+    await bulk()
+    const res = await handle('GET', '/api/sessions?limit=5', null, env)
+
+    expect(res.body.sessions).toHaveLength(5)
+    expect(res.body.total).toBe(12)
+  })
+
+  it('moves the window with offset, without repeating a row', async () => {
+    await bulk()
+    const first = await handle('GET', '/api/sessions?limit=5&offset=0', null, env)
+    const second = await handle('GET', '/api/sessions?limit=5&offset=5', null, env)
+
+    const ids = (r: { body: { sessions: { id: string }[] } }) => r.body.sessions.map((s) => s.id)
+    expect(ids(first)).not.toEqual(ids(second))
+    expect(ids(first).filter((id) => ids(second).includes(id))).toEqual([])
+  })
+
+  it('pages the activities of one session, and says how many there are', async () => {
+    await bulk()
+    const res = await handle('GET', '/api/sessions/s1?limit=4&offset=4', null, env)
+
+    expect(res.body.activities).toHaveLength(4)
+    expect(res.body.activities[0].seq).toBe(5)
+    expect(res.body.total).toBe(12)
+  })
+
+  it('pages notes and regions the same way', async () => {
+    const notes = await handle('GET', '/api/notes?limit=1', null, env)
+    expect(notes.body.notes).toHaveLength(1)
+    expect(notes.body.total).toBe(1)
+
+    const regions = await handle('GET', '/api/regions?limit=1', null, env)
+    expect(regions.body.regions).toHaveLength(1)
+    expect(regions.body.total).toBe(1)
+  })
+
+  it('refuses a limit or offset that is not a sane number', async () => {
+    // These arrive from a URL, so they arrive as anything. A negative offset is
+    // a SQL error and a vast limit is a way to ask the server to read the whole
+    // table into memory.
+    const nonsense = ['limit=0', 'limit=-3', 'limit=abc', 'limit=99999', 'offset=-1', 'offset=x']
+    for (const query of nonsense) {
+      const res = await handle('GET', `/api/sessions?${query}`, null, env)
+      expect(res.status, query).toBe(200)
+      expect(res.body.sessions.length, query).toBeGreaterThan(0)
+    }
+  })
+})
+
 describe('GET /api/sessions', () => {
   it('returns the sessions in the store', async () => {
     const res = await handle('GET', '/api/sessions', null, env)

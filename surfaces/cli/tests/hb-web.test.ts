@@ -43,6 +43,8 @@ describe('hb web, as an actual process', () => {
     await new Promise((r) => setTimeout(r, 250))
     const res = await fetch(`http://127.0.0.1:${port}/api/notes`)
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ notes: [] })
+    // What this test is for is that the process is still up and serving, not
+    // what any one route's body looks like.
+    expect(await res.json()).toMatchObject({ notes: [] })
   }, 20000)
 })

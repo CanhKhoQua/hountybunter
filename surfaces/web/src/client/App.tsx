@@ -37,9 +37,12 @@ export function App() {
       <button
         type="button"
         className={
-          'fixed top-1/2 z-2 -mt-5.5 h-11 w-4.5 cursor-pointer rounded-r ' +
-          'border border-l-0 border-line bg-raised text-ink-soft ' +
-          'transition-[left] duration-150 ' +
+          // 24px wide, not 18: this is the only way back to a collapsed menu,
+          // and below 24px it is under the minimum target size.
+          'fixed top-1/2 z-2 -mt-6 flex h-12 w-6 cursor-pointer items-center ' +
+          'justify-center rounded-r border border-l-0 border-line bg-raised ' +
+          'text-ink-soft transition-[left] duration-150 ' +
+          'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ' +
           (menuOpen ? 'left-[var(--spacing-menu)]' : 'left-0')
         }
         aria-label={menuOpen ? 'Collapse menu' : 'Expand menu'}
@@ -54,7 +57,10 @@ export function App() {
             never getting art, so it is capped rather than sized by content. */}
         <div className="max-h-[22vh] shrink-0" />
         <section className="min-h-0 flex-1 overflow-auto px-6 pt-4 pb-8">
-          <h2 className="mb-4 text-[15px] font-semibold tracking-wide uppercase text-ink-soft">
+          {/* Full-strength ink. Muted, the page's own title was quieter than
+              the menu item pointing at it — and when the menu is collapsed to
+              nothing, this line is the only thing saying where you are. */}
+          <h2 className="mb-4 text-[15px] font-semibold tracking-wide uppercase text-ink">
             {TITLES[view]}
           </h2>
           {view === 'hunt' ? <Hunt timeZone={TIME_ZONE} /> : null}
@@ -63,8 +69,8 @@ export function App() {
           {view === 'regions' ? <Regions /> : null}
           {view === 'bounties' ? (
             <p className="py-3 text-ink-soft">
-              Phase 8, not built. Until then GitHub issues are the source of truth, and a
-              note can point at one with evidence of kind <code>url</code>.
+              Not built yet. Until it is, GitHub issues are the source of truth, and a note
+              can point at one with evidence of kind <code>url</code>.
             </p>
           ) : null}
         </section>

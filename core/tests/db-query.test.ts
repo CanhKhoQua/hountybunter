@@ -5,6 +5,10 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { indexNote } from '../src/db/write.js'
 import { openDb } from '../src/db/open.js'
 import {
+  countActivities,
+  countNotes,
+  countRegions,
+  countSessions,
   escapeFts,
   getSession,
   listActivities,
@@ -84,6 +88,18 @@ describe('listNotes', () => {
   it('respects a limit', () => {
     expect(listNotes(db, { limit: 1 })).toHaveLength(1)
   })
+
+  it('walks the list a page at a time, in the same order', () => {
+    expect(listNotes(db, { limit: 2, offset: 0 }).map((h) => h.id)).toEqual(['n4', 'n3'])
+    expect(listNotes(db, { limit: 2, offset: 2 }).map((h) => h.id)).toEqual(['n2', 'n1'])
+    expect(listNotes(db, { limit: 2, offset: 99 })).toEqual([])
+  })
+
+  it('counts every note a page could be taken from, filters included', () => {
+    expect(countNotes(db)).toBe(4)
+    expect(countNotes(db, { project: 'proj-a' })).toBe(2)
+    expect(countNotes(db, { status: 'superseded' })).toBe(1)
+  })
 })
 
 describe('escapeFts', () => {
@@ -133,6 +149,28 @@ describe('listSessions', () => {
     expect(listSessions(db, { limit: 1 }).map((s) => s.id)).toEqual(['s2'])
   })
 
+  it('walks the list a page at a time, in the same order', () => {
+    // The window has to move without reordering, or page two shows rows page
+    // one already did.
+    expect(listSessions(db, { limit: 2, offset: 0 }).map((s) => s.id)).toEqual(['s2', 's3'])
+    expect(listSessions(db, { limit: 2, offset: 2 }).map((s) => s.id)).toEqual(['s1'])
+    expect(listSessions(db, { limit: 2, offset: 99 })).toEqual([])
+  })
+
+  it('counts every session a page could be taken from', () => {
+    // The count is what tells a reader a page is a page. It has to answer for
+    // the same rows the list would return, so it carries the same filters —
+    // including the one that keeps subagent runs out.
+    expect(countSessions(db)).toBe(3)
+    expect(countSessions(db, { project: 'proj-b' })).toBe(1)
+  })
+
+  it('counts around the limit, not within it', () => {
+    // A limited page still has to report the size of the whole list, or the
+    // reader is told there is nothing more when there is.
+    expect(countSessions(db)).toBe(listSessions(db, { limit: 1000 }).length)
+  })
+
   it('sorts a session with no start time last rather than dropping it', () => {
     session('s4', 'proj-a', null, 'undated')
     expect(listSessions(db).map((s) => s.id)).toEqual(['s2', 's3', 's1', 's4'])
@@ -169,6 +207,18 @@ describe('getSession and listActivities', () => {
 
   it('respects a limit', () => {
     expect(listActivities(db, 's1', { limit: 2 }).map((a) => a.seq)).toEqual([1, 2])
+  })
+
+  it('walks a long transcript a page at a time, still in seq order', () => {
+    expect(listActivities(db, 's1', { limit: 2, offset: 2 }).map((a) => a.seq)).toEqual([3])
+    expect(listActivities(db, 's1', { limit: 2, offset: 9 })).toEqual([])
+  })
+
+  it('counts every activity in the session, past whatever a page holds', () => {
+    // The one that mattered: a session of thousands was served its first 500
+    // and said nothing, directly under a row reporting the true total.
+    expect(countActivities(db, 's1')).toBe(3)
+    expect(countActivities(db, 'nope')).toBe(0)
   })
 
   it('returns an empty array for a session with nothing in it', () => {
@@ -220,5 +270,25 @@ describe('listRegions', () => {
 
   it('includes a project that has notes but no session yet', () => {
     expect(listRegions(db).map((r) => r.project)).toContain('proj-c')
+  })
+
+  it('walks the list a page at a time, in the same order', () => {
+    expect(listRegions(db, { limit: 2, offset: 0 }).map((r) => r.project)).toEqual([
+      'proj-a',
+      'proj-b',
+    ])
+    expect(listRegions(db, { limit: 2, offset: 2 }).map((r) => r.project)).toEqual(['proj-c'])
+  })
+
+  it('counts the regions a page could be taken from', () => {
+    // Regions are a union of two tables, so the count cannot be a row count of
+    // either one on its own.
+    expect(countRegions(db)).toBe(3)
+  })
+
+  it('lists every region when no page is asked for', () => {
+    // The default has to stay unlimited: the CLI and the region grid both read
+    // the whole list, and a silent cap here is the bug this work is about.
+    expect(listRegions(db)).toHaveLength(countRegions(db))
   })
 })

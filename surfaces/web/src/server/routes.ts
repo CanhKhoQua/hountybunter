@@ -1,4 +1,8 @@
 import {
+  countActivities,
+  countNotes,
+  countRegions,
+  countSessions,
   getNote,
   getSession,
   indexNote,
@@ -20,6 +24,27 @@ import { HuntRegistry, type Hunt } from './hunts.js'
 
 /** Request headers, lower-cased as Node delivers them. */
 export type Headers = Record<string, string | string[] | undefined>
+
+/** The largest page any list route will serve, however large a limit is asked for. */
+const MAX_PAGE = 500
+
+/**
+ * The window a list route was asked for.
+ *
+ * Both numbers arrive from a URL, so both arrive as anything at all: a
+ * negative offset is a SQL error, a word is a NaN that would reach a LIMIT,
+ * and a vast limit is a way to ask the server to read a whole table into
+ * memory. Anything that is not a sane whole number falls back to the default
+ * rather than being passed on.
+ */
+function page(params: URLSearchParams, fallback: number): { limit: number; offset: number } {
+  const asked = Number(params.get('limit'))
+  const from = Number(params.get('offset'))
+  return {
+    limit: Number.isInteger(asked) && asked > 0 ? Math.min(asked, MAX_PAGE) : fallback,
+    offset: Number.isInteger(from) && from > 0 ? from : 0,
+  }
+}
 
 /**
  * Where a reconnecting client wants the stream resumed, from its
@@ -125,8 +150,16 @@ export async function handle(
   // handle left open blocks the rebuild that is meant to be able to delete it.
   const db = openDb(env)
   try {
+    // Every list route answers with the page it served *and* the size of the
+    // list it came from. Without the total, a client cannot tell a short list
+    // from a truncated one — which is how a session of thousands came to show
+    // its first 500 rows in silence, under a row reporting the true count.
     if (path === '/api/sessions') {
-      return { status: 200, body: { sessions: listSessions(db, { limit: 200 }) } }
+      const { limit, offset } = page(params, 50)
+      return {
+        status: 200,
+        body: { sessions: listSessions(db, { limit, offset }), total: countSessions(db) },
+      }
     }
 
     const detail = path.match(/^\/api\/sessions\/([^/]+)$/)
@@ -134,13 +167,27 @@ export async function handle(
       const id = decodeURIComponent(detail[1]!)
       const session = getSession(db, id)
       if (!session) return { status: 404, body: { error: `no session ${id}` } }
-      return { status: 200, body: { session, activities: listActivities(db, id) } }
+      const { limit, offset } = page(params, 100)
+      return {
+        status: 200,
+        body: {
+          session,
+          activities: listActivities(db, id, { limit, offset }),
+          total: countActivities(db, id),
+        },
+      }
     }
 
     if (path === '/api/notes') {
       const query = params.get('q')?.trim()
-      const notes = query ? searchNotes(db, query) : listNotes(db)
-      return { status: 200, body: { notes } }
+      const { limit, offset } = page(params, 50)
+      // A search is ranked by relevance and capped by the limit; paging into
+      // rank is not a window a reader can hold, so only the plain list pages.
+      if (query) return { status: 200, body: { notes: searchNotes(db, query, { limit }) } }
+      return {
+        status: 200,
+        body: { notes: listNotes(db, { limit, offset }), total: countNotes(db) },
+      }
     }
 
     const noteDetail = path.match(/^\/api\/notes\/(.+)$/)
@@ -152,7 +199,11 @@ export async function handle(
     }
 
     if (path === '/api/regions') {
-      return { status: 200, body: { regions: listRegions(db) } }
+      const { limit, offset } = page(params, 100)
+      return {
+        status: 200,
+        body: { regions: listRegions(db, { limit, offset }), total: countRegions(db) },
+      }
     }
 
     // Whether the observing half is working at all. `hook_events` alone cannot

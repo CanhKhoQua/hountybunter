@@ -177,6 +177,33 @@ describe('Hunt', () => {
     expect(screen.queryByText(/ghost/i)).toBe(null)
   })
 
+  it('shows only the places worked in most recently, and offers the rest', async () => {
+    // Not paged: this is a picker inside a form, and it is the *recent* list —
+    // page three of "recent" answers nobody's question. It caps and expands.
+    const many = Array.from({ length: 14 }, (_, i) => ({
+      project: `p${i}`,
+      sessions: 1,
+      notes: 0,
+      path: `/w/p${i}`,
+      name: `place-${i}`,
+      lastSeenAt: `2026-08-${String(i + 1).padStart(2, '0')}T10:00:00.000Z`,
+    }))
+    fetchMock.mockImplementation(async (url: string) => ({
+      ok: true,
+      status: 200,
+      json: async () => (url === '/api/regions' ? { regions: many } : { hunts: [] }),
+    }))
+    const user = userEvent.setup()
+    render(<Hunt timeZone="UTC" />)
+
+    // Newest first, so the most recent survives the cap and the oldest does not.
+    expect(await screen.findByText('place-13')).toBeTruthy()
+    expect(screen.queryByText('place-0')).toBe(null)
+
+    await user.click(screen.getByRole('button', { name: /show all/i }))
+    expect(screen.getByText('place-0')).toBeTruthy()
+  })
+
   it('starts exactly the path in the field, and a listed row fills it', async () => {
     // The field is the only source of truth for where a hunt starts. A row
     // that started one directly would make two controls answer one question.
@@ -257,5 +284,34 @@ describe('Hunt', () => {
     FakeEventSource.last!.emit({ exit: 7 })
     expect(await screen.findByText(/exited with 7/i)).toBeTruthy()
     await waitFor(() => expect(FakeEventSource.last!.closed).toBe(true))
+  })
+
+  it('can stop the hunt it is attached to', async () => {
+    // Starting an agent you cannot stop leaves killing the server as the only
+    // way out. The registry already knows how; the page just never asked.
+    const user = await startHunt()
+    await user.click(screen.getByRole('button', { name: /stop hunt/i }))
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([, i]) => i?.method === 'DELETE')
+      expect(call?.[0]).toBe('/api/hunts/hunt-1')
+    })
+  })
+
+  it('offers the way back once the hunt has ended', async () => {
+    // A dead terminal that cannot be dismissed is a dead end: the only way to
+    // start another was to reload the page.
+    const user = await startHunt()
+    FakeEventSource.last!.emit({ exit: 0 })
+
+    await user.click(await screen.findByRole('button', { name: /start another/i }))
+    expect(await screen.findByLabelText(/directory/i)).toBeTruthy()
+  })
+
+  it('stops offering to stop a hunt that has already ended', async () => {
+    await startHunt()
+    FakeEventSource.last!.emit({ exit: 0 })
+
+    await waitFor(() => expect(screen.queryByRole('button', { name: /stop hunt/i })).toBe(null))
   })
 })

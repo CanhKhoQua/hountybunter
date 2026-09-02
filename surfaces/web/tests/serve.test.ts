@@ -26,7 +26,9 @@ describe('serve', () => {
     const res = await fetch(`${base}/api/notes`)
     expect(res.status).toBe(200)
     expect(res.headers.get('content-type')).toMatch(/application\/json/)
-    expect(await res.json()).toEqual({ notes: [] })
+    // The route's own body shape is asserted in routes.test.ts. What this test
+    // is for is that a real socket carried a real JSON body at all.
+    expect(await res.json()).toMatchObject({ notes: [] })
   })
 
   it('binds the loopback interface only, never every interface', async () => {

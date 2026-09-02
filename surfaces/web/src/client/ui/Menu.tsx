@@ -11,7 +11,9 @@ export const MENU: MenuItem[] = [
   { key: 'notes', label: "Hunter's notes" },
   { key: 'sessions', label: 'Sessions' },
   { key: 'regions', label: 'Regions' },
-  { key: 'bounties', label: 'Bounties', tally: 'phase 8' },
+  // No tally: which phase builds a thing is a fact about us, not about the
+  // user's work, and the panel itself says it is not ready yet.
+  { key: 'bounties', label: 'Bounties' },
 ]
 
 export function Menu({
@@ -30,6 +32,7 @@ export function Menu({
           className={
             'flex w-full cursor-pointer items-baseline justify-between gap-2 ' +
             'border-0 border-l-3 bg-transparent px-4 py-2.5 text-left font-[inherit] ' +
+            'focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent ' +
             (current === item.key
               ? 'border-l-accent font-semibold text-ink'
               : 'border-l-transparent text-ink-soft hover:text-ink')

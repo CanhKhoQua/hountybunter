@@ -38,10 +38,11 @@ export function searchNotes(
   return db.prepare(sql).all(...params) as NoteHit[]
 }
 
-export function listNotes(
-  db: Database.Database,
-  opts: { project?: string; status?: string; limit?: number } = {},
-): NoteHit[] {
+/** The filters `listNotes` and `countNotes` must agree on, built once. */
+function noteFilter(opts: { project?: string; status?: string }): {
+  sql: string
+  params: unknown[]
+} {
   const where: string[] = []
   const params: unknown[] = []
   if (opts.project) {
@@ -52,17 +53,39 @@ export function listNotes(
     where.push('status = ?')
     params.push(opts.status)
   }
-  params.push(opts.limit ?? 50)
+  return { sql: where.length ? `WHERE ${where.join(' AND ')}` : '', params }
+}
+
+export function listNotes(
+  db: Database.Database,
+  opts: { project?: string; status?: string; limit?: number; offset?: number } = {},
+): NoteHit[] {
+  const filter = noteFilter(opts)
 
   return db
     .prepare(
       `SELECT id, project, title, kind, status, '' AS snippet
        FROM notes
-       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+       ${filter.sql}
        ORDER BY id DESC
-       LIMIT ?`,
+       LIMIT ? OFFSET ?`,
     )
-    .all(...params) as NoteHit[]
+    .all(...filter.params, opts.limit ?? 50, opts.offset ?? 0) as NoteHit[]
+}
+
+/**
+ * How many notes `listNotes` would have to choose from. Kept beside it, and
+ * sharing its filter, because a count answering for different rows than the
+ * list tells the reader a page is the whole thing when it is not.
+ */
+export function countNotes(
+  db: Database.Database,
+  opts: { project?: string; status?: string } = {},
+): number {
+  const filter = noteFilter(opts)
+  return (
+    db.prepare(`SELECT COUNT(*) n FROM notes ${filter.sql}`).get(...filter.params) as { n: number }
+  ).n
 }
 
 export interface SessionHit {
@@ -73,12 +96,13 @@ export interface SessionHit {
   activities: number
 }
 
-export function listSessions(
-  db: Database.Database,
-  opts: { project?: string; limit?: number; parent?: string } = {},
-): SessionHit[] {
-  const params: unknown[] = []
+/** The filters `listSessions` and `countSessions` must agree on, built once. */
+function sessionFilter(opts: { project?: string; parent?: string }): {
+  sql: string
+  params: unknown[]
+} {
   const where: string[] = []
+  const params: unknown[] = []
 
   if (opts.parent) {
     where.push('s.parent_id = ?')
@@ -93,7 +117,14 @@ export function listSessions(
     where.push('s.project = ?')
     params.push(opts.project)
   }
-  params.push(opts.limit ?? 20)
+  return { sql: `WHERE ${where.join(' AND ')}`, params }
+}
+
+export function listSessions(
+  db: Database.Database,
+  opts: { project?: string; limit?: number; offset?: number; parent?: string } = {},
+): SessionHit[] {
+  const filter = sessionFilter(opts)
 
   // SQLite sorts NULL below every value, so DESC already places a session with no
   // observed timestamp last. It is still listed: an absent signal is shown as
@@ -103,11 +134,24 @@ export function listSessions(
       `SELECT s.id, s.project, s.started_at, s.title,
               (SELECT COUNT(*) FROM activities a WHERE a.session_id = s.id) AS activities
        FROM sessions s
-       WHERE ${where.join(' AND ')}
+       ${filter.sql}
        ORDER BY s.started_at DESC, s.id ASC
-       LIMIT ?`,
+       LIMIT ? OFFSET ?`,
     )
-    .all(...params) as SessionHit[]
+    .all(...filter.params, opts.limit ?? 20, opts.offset ?? 0) as SessionHit[]
+}
+
+/** How many sessions `listSessions` would have to choose from. */
+export function countSessions(
+  db: Database.Database,
+  opts: { project?: string; parent?: string } = {},
+): number {
+  const filter = sessionFilter(opts)
+  return (
+    db.prepare(`SELECT COUNT(*) n FROM sessions s ${filter.sql}`).get(...filter.params) as {
+      n: number
+    }
+  ).n
 }
 
 export interface SessionDetail extends SessionHit {
@@ -141,7 +185,7 @@ export interface ActivityRow {
 export function listActivities(
   db: Database.Database,
   sessionId: string,
-  opts: { limit?: number } = {},
+  opts: { limit?: number; offset?: number } = {},
 ): ActivityRow[] {
   // Ordered by seq, not by id: seq is the transcript's own ordering, and an
   // incremental ingest can insert an earlier session's rows after a later one's.
@@ -151,9 +195,22 @@ export function listActivities(
        FROM activities
        WHERE session_id = ?
        ORDER BY seq ASC
-       LIMIT ?`,
+       LIMIT ? OFFSET ?`,
     )
-    .all(sessionId, opts.limit ?? 500) as ActivityRow[]
+    .all(sessionId, opts.limit ?? 500, opts.offset ?? 0) as ActivityRow[]
+}
+
+/**
+ * How many activities the session holds. The longest transcripts run to
+ * thousands of rows, so a page is all a reader ever gets — and without this
+ * the page was served silently, directly under a total it contradicted.
+ */
+export function countActivities(db: Database.Database, sessionId: string): number {
+  return (
+    db.prepare('SELECT COUNT(*) n FROM activities WHERE session_id = ?').get(sessionId) as {
+      n: number
+    }
+  ).n
 }
 
 export interface RegionRow {
@@ -171,7 +228,10 @@ export interface RegionRow {
  * than joined from sessions alone: a project can hold notes before it has ever
  * been ingested, and dropping it would hide ground the user has already walked.
  */
-export function listRegions(db: Database.Database): RegionRow[] {
+export function listRegions(
+  db: Database.Database,
+  opts: { limit?: number; offset?: number } = {},
+): RegionRow[] {
   return db
     .prepare(
       `SELECT p.project AS project,
@@ -182,7 +242,26 @@ export function listRegions(db: Database.Database): RegionRow[] {
               d.last_seen_at AS lastSeenAt
        FROM (SELECT project FROM sessions UNION SELECT project FROM notes) p
        LEFT JOIN projects d ON d.slug = p.project
-       ORDER BY sessions DESC, p.project ASC`,
+       ORDER BY sessions DESC, p.project ASC
+       LIMIT ? OFFSET ?`,
     )
-    .all() as RegionRow[]
+    // Unlimited by default. Both the CLI and the region grid read the whole
+    // list, and a cap nobody asked for is the bug this paging exists to end.
+    .all(opts.limit ?? -1, opts.offset ?? 0) as RegionRow[]
+}
+
+/**
+ * How many regions there are. A row count of either table alone would be
+ * wrong: a region is one side or the other of a union, and a project can hold
+ * notes before it has ever been ingested.
+ */
+export function countRegions(db: Database.Database): number {
+  return (
+    db
+      .prepare(
+        `SELECT COUNT(*) n
+         FROM (SELECT project FROM sessions UNION SELECT project FROM notes)`,
+      )
+      .get() as { n: number }
+  ).n
 }

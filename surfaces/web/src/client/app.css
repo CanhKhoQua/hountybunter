@@ -16,6 +16,14 @@
   --color-line: #e2ded9;
   --color-accent: #7c5c3e;
   --color-warn: #9a6b2f;
+  /*
+   * The terminal's own surface. It stays dark in both schemes because xterm
+   * draws light text on it, and it is warm rather than neutral so the one
+   * black rectangle on a paper-coloured page still belongs to the palette.
+   * Hunt.tsx repeats this hex: xterm parses colours itself and cannot read a
+   * custom property. A test holds the two together.
+   */
+  --color-pit: #14120f;
   --spacing-menu: 288px;
 }
 
