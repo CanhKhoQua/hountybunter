@@ -17,6 +17,23 @@ import { bindHunt, latestHookId, type Binding } from '@hountybunter/adapter-clau
 import { chooseDirectory } from './choose.js'
 import { HuntRegistry, type Hunt } from './hunts.js'
 
+/** Request headers, lower-cased as Node delivers them. */
+export type Headers = Record<string, string | string[] | undefined>
+
+/**
+ * Where a reconnecting client wants the stream resumed, from its
+ * `Last-Event-ID`. Anything that is not a whole number is no answer at all:
+ * the header is whatever the client sent, and a NaN reaching a slice would
+ * silently cost that client its backlog.
+ */
+function resumeFrom(headers: Headers): number | undefined {
+  const raw = headers['last-event-id']
+  const value = Array.isArray(raw) ? raw[0] : raw
+  if (value === undefined) return undefined
+  const at = Number(value)
+  return Number.isInteger(at) && at >= 0 ? at : undefined
+}
+
 export interface Response {
   status: number
   /** Absent for 204: a hook is told nothing, so there is nothing to send. */
@@ -80,6 +97,7 @@ export async function handle(
   body: unknown,
   env: NodeJS.ProcessEnv = process.env,
   hunts: HuntRegistry = defaultHunts,
+  headers: Headers = {},
 ): Promise<Response> {
   const [path = '/', search] = rawPath.split('?')
   const params = new URLSearchParams(search ?? '')
@@ -97,7 +115,7 @@ export async function handle(
   const hunted = path.match(/^\/api\/hunts(?:\/([^/]+))?(?:\/(stream|input|resize))?$/)
   if (hunted) {
     const [, id, action] = hunted
-    return huntRoute(method, id, action, body, env, hunts)
+    return huntRoute(method, id, action, body, env, hunts, headers)
   }
 
   if (method !== 'GET') return { status: 404, body: { error: `no route for ${method} ${path}` } }
@@ -220,6 +238,7 @@ async function huntRoute(
   body: unknown,
   env: NodeJS.ProcessEnv,
   hunts: HuntRegistry,
+  headers: Headers,
 ): Promise<Response> {
   const command = agentCommand(env)
 
@@ -268,13 +287,19 @@ async function huntRoute(
       // The registry replays its backlog to a new subscriber, so a tab opened
       // after the agent started talking still sees what it said — and tells it
       // when the agent is gone, so the connection ends instead of hanging.
+      // Every frame is numbered with the position after it, and a reconnecting
+      // browser sends that number back in Last-Event-ID. Without it the only
+      // thing a reconnect can do is replay the buffer, printing the last
+      // screen twice — and EventSource reconnects by itself, so that is not a
+      // rare case.
       stream: (write, end) =>
         hunt.subscribe(
-          (output) => write(`data: ${JSON.stringify({ output })}\n\n`),
+          (output, at) => write(`id: ${at}\ndata: ${JSON.stringify({ output })}\n\n`),
           () => {
             write(`data: ${JSON.stringify({ exit: hunt.exitCode })}\n\n`)
             end()
           },
+          resumeFrom(headers),
         ),
     }
   }

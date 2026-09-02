@@ -40,7 +40,13 @@ export interface Hunt {
    * to a finished hunt is told so rather than left holding a connection that
    * will never produce another byte. Returns an unsubscribe.
    */
-  subscribe(listener: (chunk: string) => void, onEnd?: () => void): () => void
+  subscribe(
+    /** `at` is the position in the output after this chunk: where to resume. */
+    listener: (chunk: string, at: number) => void,
+    onEnd?: () => void,
+    /** Resume after this position, from a client that has seen that much. */
+    since?: number,
+  ): () => void
   write(data: string): void
   resize(cols: number, rows: number): void
 }
@@ -84,6 +90,9 @@ export class HuntRegistry {
     const id = randomUUID()
     const listeners = new Set<{ data: (chunk: string) => void; end?: () => void }>()
     let buffered = ''
+    // Everything ever produced, counted. `buffered` keeps only the tail, so it
+    // cannot say where in the output a client has got to.
+    let emitted = 0
 
     const hunt: HuntState = {
       id,
@@ -95,9 +104,20 @@ export class HuntRegistry {
       killedAt: null,
       agent,
       buffer: () => buffered,
-      subscribe(listener, onEnd) {
-        // The backlog first, so a tab opened a second late is not blank.
-        if (buffered) listener(buffered)
+      subscribe(listener, onEnd, since) {
+        // The backlog first, so a tab opened a second late is not blank — but
+        // only the part this client has not seen. A browser reconnects on its
+        // own and reports the last id it received; replaying everything to it
+        // prints the last screen twice.
+        //
+        // The buffer covers [emitted - buffered.length, emitted). A client
+        // that fell further behind than that cannot be caught up exactly, so
+        // it gets what is left: a screen missing its oldest lines beats a
+        // blank one, and beats pretending nothing happened.
+        const held = emitted - buffered.length
+        const from = since === undefined ? held : Math.max(since, held)
+        const backlog = from >= emitted ? '' : buffered.slice(from - held)
+        if (backlog) listener(backlog, emitted)
         if (hunt.exitCode !== null) {
           onEnd?.()
           return () => undefined
@@ -112,7 +132,10 @@ export class HuntRegistry {
 
     agent.onData((chunk) => {
       buffered = (buffered + chunk).slice(-BUFFER_BYTES)
-      for (const listener of listeners) listener.data(chunk)
+      // Counted before the listeners are told, so the position they are given
+      // is the one to resume after — the end of what they have just received.
+      emitted += chunk.length
+      for (const listener of listeners) listener.data(chunk, emitted)
     })
     agent.onExit((code) => {
       // Death is a state the user needs to see, so the hunt stays listed with

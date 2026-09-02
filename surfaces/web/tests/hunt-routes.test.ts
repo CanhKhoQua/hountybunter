@@ -86,8 +86,88 @@ describe('GET /api/hunts/:id/stream', () => {
     const frames: string[] = []
     const close = res.stream!((chunk) => frames.push(chunk))
     try {
-      expect(frames.join('')).toMatch(/^data: /)
-      expect(JSON.parse(frames[0]!.replace(/^data: /, '').trim()).output).toContain('hello')
+      expect(frames.join('')).toMatch(/^id: \d+\ndata: /)
+      expect(JSON.parse(frames[0]!.replace(/^id: \d+\ndata: /, '').trim()).output).toContain(
+        'hello',
+      )
+    } finally {
+      close()
+    }
+  })
+
+  it('numbers each frame, so a reconnect can say where it got to', async () => {
+    // EventSource reconnects on its own and sends back the last id it saw.
+    // Without an id there is nothing for it to send back, and all the server
+    // can do on reconnect is replay the backlog again.
+    const hunt = hunts.start({ command: '/bin/sh', args: ['-c', 'echo hello; sleep 30'] })
+    await until(() => hunt.buffer().includes('hello'), 'the child to speak')
+
+    const res = await handle('GET', `/api/hunts/${hunt.id}/stream`, null, env, hunts)
+    const frames: string[] = []
+    const close = res.stream!((chunk) => frames.push(chunk))
+    try {
+      expect(frames[0]).toMatch(/^id: \d+\ndata: /)
+    } finally {
+      close()
+    }
+  })
+
+  it('sends only what came after Last-Event-ID, not the backlog again', async () => {
+    // The bug: the browser reconnects, the server replays its whole buffer,
+    // and the terminal prints the last screen a second time.
+    const hunt = hunts.start({ command: '/bin/sh', args: ['-c', 'echo hello; sleep 30'] })
+    await until(() => hunt.buffer().includes('hello'), 'the child to speak')
+
+    const first = await handle('GET', `/api/hunts/${hunt.id}/stream`, null, env, hunts)
+    const seen: string[] = []
+    const close = first.stream!((chunk) => seen.push(chunk))
+    const at = seen[0]!.match(/^id: (\d+)/)![1]!
+    close()
+
+    const again = await handle('GET', `/api/hunts/${hunt.id}/stream`, null, env, hunts, {
+      'last-event-id': at,
+    })
+    const frames: string[] = []
+    const closeAgain = again.stream!((chunk) => frames.push(chunk))
+    try {
+      expect(frames).toHaveLength(0)
+    } finally {
+      closeAgain()
+    }
+  })
+
+  it('replays what it still holds when the client fell too far behind', async () => {
+    // The buffer is capped, so a client away long enough cannot be caught up
+    // exactly. It gets what is left rather than nothing: a screen missing its
+    // oldest lines beats a blank one.
+    const hunt = hunts.start({ command: '/bin/sh', args: ['-c', 'echo hello; sleep 30'] })
+    await until(() => hunt.buffer().includes('hello'), 'the child to speak')
+
+    const res = await handle('GET', `/api/hunts/${hunt.id}/stream`, null, env, hunts, {
+      'last-event-id': '0',
+    })
+    const frames: string[] = []
+    const close = res.stream!((chunk) => frames.push(chunk))
+    try {
+      expect(frames.join('')).toContain('hello')
+    } finally {
+      close()
+    }
+  })
+
+  it('ignores a Last-Event-ID that is not a number', async () => {
+    // The header is whatever the client sent. Nonsense must not become a slice
+    // offset, and must not cost the client its backlog either.
+    const hunt = hunts.start({ command: '/bin/sh', args: ['-c', 'echo hello; sleep 30'] })
+    await until(() => hunt.buffer().includes('hello'), 'the child to speak')
+
+    const res = await handle('GET', `/api/hunts/${hunt.id}/stream`, null, env, hunts, {
+      'last-event-id': 'nonsense',
+    })
+    const frames: string[] = []
+    const close = res.stream!((chunk) => frames.push(chunk))
+    try {
+      expect(frames.join('')).toContain('hello')
     } finally {
       close()
     }

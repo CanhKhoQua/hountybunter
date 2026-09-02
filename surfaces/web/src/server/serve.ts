@@ -93,7 +93,9 @@ export function serve(opts: ServeOptions = {}): Promise<Server> {
         return
       }
 
-      handle(req.method ?? 'GET', url, body, env)
+      // Headers reach the routes for one reason: a reconnecting EventSource
+      // reports in Last-Event-ID how much of the stream it already holds.
+      handle(req.method ?? 'GET', url, body, env, undefined, req.headers)
         .then((result) => {
           if (result.stream) {
             res.writeHead(result.status, result.headers)
