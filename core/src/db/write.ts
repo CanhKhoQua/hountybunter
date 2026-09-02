@@ -1,7 +1,36 @@
 import type Database from 'better-sqlite3'
 import { createHash } from 'node:crypto'
+import { basename } from 'node:path'
 import { serializeNote } from '../note/serialize.js'
+import { projectSlug } from '../paths.js'
 import type { Note } from '../types.js'
+
+/**
+ * Record that work happens in `path`, so the store can name a directory and
+ * not only its slug. Called from everywhere a real path is already in hand:
+ * transcript ingest, and a hook while the session is still running.
+ *
+ * `lastSeenAt` is optional because a hook payload carries no timestamp. When
+ * absent the stored value is kept, so a hook can never blank out what a
+ * transcript established and a rebuild converges on the transcript's answer.
+ */
+export function rememberProject(
+  db: Database.Database,
+  path: string,
+  lastSeenAt: string | null = null,
+): void {
+  db.prepare(
+    `INSERT INTO projects (path, slug, name, last_seen_at)
+     VALUES (@path, @slug, @name, @last_seen_at)
+     ON CONFLICT(path) DO UPDATE SET
+       last_seen_at = MAX(COALESCE(excluded.last_seen_at, ''), COALESCE(projects.last_seen_at, ''))`,
+  ).run({
+    path,
+    slug: projectSlug(path),
+    name: basename(path) || path,
+    last_seen_at: lastSeenAt,
+  })
+}
 
 /** Content hash of the note as it would be written to disk. */
 export function noteHash(note: Note): string {

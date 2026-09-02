@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3'
 import { projectSlug } from '../paths.js'
+import { rememberProject } from '../db/write.js'
 
 /**
  * Event names seen from Claude Code as of 2026-09. Anything outside this set is
@@ -62,6 +63,13 @@ export function receiveHookEvent(
       id: sessionId,
       project: cwd ? projectSlug(cwd) : 'unknown',
     })
+
+    // The directory itself, not only its slug. A hook is the only thing that
+    // reports one while the session is still running, and the slug is one-way,
+    // so a project first seen through a hook could otherwise be named and
+    // never opened. No timestamp is passed: a hook payload has none, and a
+    // rebuild takes that answer from the transcript.
+    if (cwd) rememberProject(db, cwd)
   })()
 
   return { ok: true, unknownKind: !KNOWN_KINDS.has(kind) }

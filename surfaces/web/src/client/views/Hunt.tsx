@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
 import { api, calendarDate, type HuntRow, type RegionRow } from '../api.js'
-import { BACK, BADGE, BUTTON, FIELD, MUTED, ROW, TALLY } from '../ui/styles.js'
+import { BACK, BADGE, BUTTON, FIELD, MUTED, TALLY } from '../ui/styles.js'
 
 /**
  * A live agent session, in a real terminal.
@@ -11,6 +11,17 @@ import { BACK, BADGE, BUTTON, FIELD, MUTED, ROW, TALLY } from '../ui/styles.js'
  * runs themselves, with their plugins, skills and hooks, drawing its own
  * interface. Nothing here re-implements a chat window over it.
  */
+/**
+ * A place to work: its name, and when it was last worked in.
+ *
+ * `ROW` leads with a fixed 92px column, which is right for Sessions where the
+ * date is the sort key and wrong here, where the name is the answer.
+ */
+const PLACE =
+  'grid w-full grid-cols-[minmax(0,1fr)_auto] items-baseline gap-2.5 ' +
+  'cursor-pointer border-0 border-b border-line bg-transparent px-1.5 py-2 ' +
+  'text-left font-[inherit] text-inherit hover:bg-raised'
+
 export function Hunt({ timeZone }: { timeZone: string }) {
   const [cwd, setCwd] = useState('')
   const [grounds, setGrounds] = useState<RegionRow[]>([])
@@ -164,12 +175,16 @@ export function Hunt({ timeZone }: { timeZone: string }) {
               <button
                 key={ground.path}
                 type="button"
-                className={ROW}
+                className={PLACE}
                 onClick={() => setCwd(ground.path!)}
               >
-                <span className={TALLY}>{calendarDate(ground.lastSeenAt, timeZone)}</span>
+                {/* The project, said plainly. It is what the user is looking
+                    for, so it reads first; the path it stands for lands in the
+                    field on click, which is where a path belongs. */}
                 <span className="truncate">{ground.name}</span>
-                <span className={`truncate text-[12px] ${MUTED}`}>{ground.path}</span>
+                <span className={`text-[12px] ${TALLY}`}>
+                  {calendarDate(ground.lastSeenAt, timeZone)}
+                </span>
               </button>
             ))}
           </div>
