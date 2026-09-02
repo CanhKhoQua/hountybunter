@@ -1,5 +1,7 @@
 import type Database from 'better-sqlite3'
-import { open, readdir, realpath, stat } from 'node:fs/promises'
+import { createReadStream } from 'node:fs'
+import { readdir, realpath, stat } from 'node:fs/promises'
+import { createInterface } from 'node:readline'
 import { join } from 'node:path'
 import { transcriptRoot } from './locate.js'
 
@@ -18,8 +20,19 @@ export interface BindOptions {
   startedAt: string
 }
 
-/** Only the first chunk is read: `cwd` is on the transcript's first line. */
-const HEAD_BYTES = 8192
+/**
+ * How many records to read before giving up on a transcript reporting its cwd.
+ *
+ * Bounded by lines rather than by bytes. Measured over 120 real transcripts,
+ * the cwd is always within the first three records but is past 8 KB in 84 of
+ * them, and as far in as 92 KB: the opening record can carry a whole prompt,
+ * so a byte budget large enough to be safe would be large enough to be slow on
+ * the 40 MB files in the same directory.
+ */
+const HEAD_LINES = 10
+
+/** Where Claude Code writes the transcript of a Task-tool run. */
+const SUBAGENT_DIR = 'subagents'
 
 /** Watermark to take before spawning, so an older session's hooks cannot match. */
 export function latestHookId(db: Database.Database): number {
@@ -69,7 +82,7 @@ export async function bindHunt(
 }
 
 /**
- * The newest transcript whose own first line reports this `cwd`.
+ * The newest transcript whose own opening records report this `cwd`.
  *
  * Matching on the file's contents rather than on the directory name: Claude
  * Code mangles a path into a directory name by a transform this code would have
@@ -94,7 +107,7 @@ async function newestTranscriptIn(
     // This is also what keeps the scan cheap: only what moved recently is read.
     if (mtime < startedAtMs) continue
     if (best && mtime <= best.mtime) continue
-    const reported = await firstLineCwd(path)
+    const reported = await reportedCwd(path)
     if (!reported || (await resolved(reported)) !== cwd) continue
 
     const name = path.slice(path.lastIndexOf('/') + 1)
@@ -114,26 +127,31 @@ async function resolved(path: string): Promise<string> {
   }
 }
 
-async function firstLineCwd(path: string): Promise<string | null> {
-  let handle
+async function reportedCwd(path: string): Promise<string | null> {
+  const stream = createReadStream(path, { encoding: 'utf8' })
+  const lines = createInterface({ input: stream, crlfDelay: Infinity })
   try {
-    handle = await open(path, 'r')
-  } catch {
+    let seen = 0
+    for await (const line of lines) {
+      if (++seen > HEAD_LINES) break
+      if (!line) continue
+      let record: { cwd?: unknown }
+      try {
+        record = JSON.parse(line) as { cwd?: unknown }
+      } catch {
+        // A half-written or non-JSON record is skipped, not fatal: the record
+        // that names the cwd may still be further down.
+        continue
+      }
+      if (typeof record.cwd === 'string') return record.cwd
+    }
     return null
-  }
-  try {
-    const buffer = Buffer.alloc(HEAD_BYTES)
-    const { bytesRead } = await handle.read(buffer, 0, HEAD_BYTES, 0)
-    const head = buffer.toString('utf8', 0, bytesRead)
-    const line = head.split('\n', 1)[0]
-    if (!line) return null
-    const record = JSON.parse(line) as { cwd?: unknown }
-    return typeof record.cwd === 'string' ? record.cwd : null
   } catch {
-    // A half-written or non-JSON first line means this file cannot answer.
+    // An unreadable file cannot answer.
     return null
   } finally {
-    await handle.close()
+    lines.close()
+    stream.destroy()
   }
 }
 
@@ -147,8 +165,13 @@ async function walk(root: string, prefix = ''): Promise<string[]> {
   const found: string[] = []
   for (const entry of entries) {
     const relative = join(prefix, entry.name)
-    if (entry.isDirectory()) found.push(...(await walk(root, relative)))
-    else if (entry.name.endsWith('.jsonl')) found.push(join(root, relative))
+    if (entry.isDirectory()) {
+      // A Task-tool run writes its own transcript under `subagents/`, and it is
+      // frequently the newest file in a project. A hunt spawns a top-level
+      // `claude` and can never be one of these, so they are not candidates.
+      if (entry.name === SUBAGENT_DIR) continue
+      found.push(...(await walk(root, relative)))
+    } else if (entry.name.endsWith('.jsonl')) found.push(join(root, relative))
   }
   return found
 }

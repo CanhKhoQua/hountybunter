@@ -23,11 +23,22 @@ function hook(sessionId: string, cwd: string) {
   receiveHookEvent(db, { hook_event_name: 'SessionStart', session_id: sessionId, cwd })
 }
 
-/** A transcript as Claude Code writes one: first line carries the cwd. */
+/**
+ * A transcript as Claude Code actually writes one. The cwd is NOT on the first
+ * line: every one of the 185 transcripts on the machine this was written on
+ * opens with a `queue-operation` record that carries no cwd at all, and the
+ * first record that does is further down. A fixture that puts it on line one
+ * describes a file Claude Code has never produced.
+ */
 async function transcript(dir: string, sessionId: string, cwd: string, mtime: Date) {
   await mkdir(join(live, dir), { recursive: true })
   const path = join(live, dir, `${sessionId}.jsonl`)
-  await writeFile(path, `${JSON.stringify({ type: 'user', cwd, timestamp: STARTED })}\n`)
+  const lines = [
+    { type: 'queue-operation', operation: 'enqueue', sessionId, timestamp: STARTED },
+    { type: 'file-history-snapshot', messageId: 'm1', snapshot: {} },
+    { type: 'user', cwd, timestamp: STARTED },
+  ]
+  await writeFile(path, lines.map((line) => JSON.stringify(line)).join('\n') + '\n')
   await utimes(path, mtime, mtime)
 }
 
@@ -101,6 +112,21 @@ describe('bindHunt', () => {
     hook('sess-hooked', CWD)
     const second = await bindHunt(db, { cwd: CWD, sinceHookId: since, startedAt: STARTED }, env)
     expect(second).toEqual({ sessionId: 'sess-hooked', correlation: 'exact' })
+  })
+
+  it('never guesses a Task-tool run, however recent', async () => {
+    // A hunt spawns a top-level `claude`, so its transcript is never a
+    // subagent file. Against the real archive the newest file in a directory
+    // was a subagent run 80 times out of 265, and binding a hunt to one shows
+    // the user a session they did not start.
+    const since = latestHookId(db)
+    await transcript('-Users-x-myproject', 'sess-real', CWD, after(1000))
+    await transcript('-Users-x-myproject/sess-real/subagents', 'agent-abc', CWD, after(9000))
+
+    expect(await bindHunt(db, { cwd: CWD, sinceHookId: since, startedAt: STARTED }, env)).toEqual({
+      sessionId: 'sess-real',
+      correlation: 'guessed',
+    })
   })
 
   it('binds through a symlinked path', async () => {
