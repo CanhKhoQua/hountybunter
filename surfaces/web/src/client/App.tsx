@@ -57,7 +57,7 @@ export function App() {
           <h2 className="mb-4 text-[15px] font-semibold tracking-wide uppercase text-ink-soft">
             {TITLES[view]}
           </h2>
-          {view === 'hunt' ? <Hunt /> : null}
+          {view === 'hunt' ? <Hunt timeZone={TIME_ZONE} /> : null}
           {view === 'sessions' ? <Sessions timeZone={TIME_ZONE} /> : null}
           {view === 'notes' ? <Notes /> : null}
           {view === 'regions' ? <Regions /> : null}

@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
-import { api, type HuntRow, type Listing, type RegionRow } from '../api.js'
-import { BADGE, BUTTON, FIELD, MUTED } from '../ui/styles.js'
+import { api, calendarDate, type HuntRow, type Listing, type RegionRow } from '../api.js'
+import { BADGE, BUTTON, FIELD, MUTED, ROW, TALLY } from '../ui/styles.js'
 
 /**
  * A live agent session, in a real terminal.
@@ -11,7 +11,7 @@ import { BADGE, BUTTON, FIELD, MUTED } from '../ui/styles.js'
  * runs themselves, with their plugins, skills and hooks, drawing its own
  * interface. Nothing here re-implements a chat window over it.
  */
-export function Hunt() {
+export function Hunt({ timeZone }: { timeZone: string }) {
   const [cwd, setCwd] = useState('')
   const [grounds, setGrounds] = useState<RegionRow[]>([])
   const [listing, setListing] = useState<Listing | null>(null)
@@ -36,11 +36,19 @@ export function Hunt() {
       .catch(() => setGrounds([]))
   }, [])
 
+  // The field is the only place that says where the list is looking: everything
+  // up to its last slash is the directory, so browsing and typing are one act.
+  const cut = cwd.lastIndexOf('/')
+  const dir = cut >= 0 ? cwd.slice(0, cut + 1) : undefined
+
   useEffect(() => {
-    browse()
-    // Home, once. Where the browser goes after that is the user's business.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+    api
+      .directories(dir)
+      .then((data) => setListing(data.listing))
+      // A path that cannot be listed leaves the list where it was. Emptying it
+      // would read as "nothing in here" for what is only a half-typed name.
+      .catch(() => undefined)
+  }, [dir])
 
   useEffect(() => {
     if (!hunt) return
@@ -103,15 +111,6 @@ export function Hunt() {
     }
   }, [hunt, exit])
 
-  const browse = (where?: string) => {
-    api
-      .directories(where)
-      .then((data) => setListing(data.listing))
-      // A directory that cannot be listed leaves the browser where it was,
-      // rather than emptying it and reading as "nothing in here".
-      .catch(() => undefined)
-  }
-
   const start = (where: string) => {
     setError(null)
     api
@@ -121,80 +120,85 @@ export function Hunt() {
   }
 
   if (!hunt) {
+    const target = cwd.trim().replace(/\/+$/, '')
+    const named = target.slice(target.lastIndexOf('/') + 1)
+    const filter = cwd.slice(cwd.lastIndexOf('/') + 1).toLowerCase()
+    const worked = grounds.filter((g) => g.name!.toLowerCase().includes(filter))
+    const inside = (listing?.entries ?? []).filter((e) => e.name.toLowerCase().includes(filter))
+
     return (
       <form
-        className="flex max-w-160 flex-col gap-2"
+        className="flex max-w-160 flex-col gap-3"
         onSubmit={(event) => {
           event.preventDefault()
           start(cwd)
         }}
       >
-        {grounds.length > 0 ? (
-          <>
-            <h2 className="m-0 text-sm font-semibold">Where you have hunted before</h2>
-            <ul className="m-0 flex list-none flex-col gap-1 p-0">
-              {grounds.map((ground) => (
-                <li key={ground.path}>
-                  <button
-                    type="button"
-                    className={`${BUTTON} w-full justify-start text-left`}
-                    onClick={() => start(ground.path!)}
-                  >
-                    Hunt in {ground.name}
-                    <span className={`ml-2 truncate text-[12px] ${MUTED}`}>{ground.path}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </>
-        ) : null}
-        {listing ? (
-          <>
-            <h2 className="m-0 text-sm font-semibold">Anywhere else</h2>
-            <div className="flex items-center gap-2">
-              <code className="grow truncate text-[12px]">{listing.path}</code>
-              <button type="button" className={BUTTON} onClick={() => start(listing.path)}>
-                Hunt here
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="hunt-cwd" className="text-[13px]">
+            Working directory
+          </label>
+          <div className="flex items-center gap-2">
+            <input
+              id="hunt-cwd"
+              className={`${FIELD} grow font-mono text-[13px]`}
+              value={cwd}
+              onChange={(event) => setCwd(event.target.value)}
+              placeholder={listing?.path ?? '/Users/you/project'}
+              spellCheck={false}
+              autoComplete="off"
+            />
+            <button type="submit" className={BUTTON} disabled={!target}>
+              {/* A control says what it does, and where. The path above is long
+                  enough to be read past. */}
+              {named ? `Start hunt in ${named}` : 'Start hunt'}
+            </button>
+          </div>
+          <p className={`m-0 text-[12px] ${MUTED}`}>
+            Type or paste a path. Anything after the last slash filters the list.
+          </p>
+        </div>
+
+        {/* One list, one column of names. Rows are the app's own list row, not
+            buttons: a screen of filled accent bars has no primary action left. */}
+        <ul className="m-0 flex max-h-96 list-none flex-col overflow-y-auto p-0">
+          {worked.map((ground) => (
+            <li key={ground.path}>
+              <button type="button" className={ROW} onClick={() => setCwd(ground.path!)}>
+                <span className={TALLY}>{calendarDate(ground.lastSeenAt, timeZone)}</span>
+                <span className="truncate">{ground.name}</span>
+                <span className={`truncate text-[12px] ${MUTED}`}>{ground.path}</span>
               </button>
-            </div>
-            <ul className="m-0 flex max-h-64 list-none flex-col gap-1 overflow-y-auto p-0">
-              {listing.parent ? (
-                <li>
-                  <button
-                    type="button"
-                    className={`${BUTTON} w-full justify-start text-left`}
-                    onClick={() => browse(listing.parent!)}
-                  >
-                    Up one level
-                  </button>
-                </li>
-              ) : null}
-              {listing.entries.map((entry) => (
-                <li key={entry.path}>
-                  <button
-                    type="button"
-                    className={`${BUTTON} w-full justify-start text-left`}
-                    onClick={() => browse(entry.path)}
-                  >
-                    Open {entry.name}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </>
-        ) : null}
-        <label htmlFor="hunt-cwd">Another directory</label>
-        <input
-          id="hunt-cwd"
-          className={FIELD}
-          value={cwd}
-          onChange={(event) => setCwd(event.target.value)}
-          placeholder="/Users/you/project"
-        />
-        <button type="submit" className={BUTTON} disabled={!cwd.trim()}>
-          Start a hunt
-        </button>
-        {error ? <p className="text-red-700">{error}</p> : null}
+            </li>
+          ))}
+          {listing?.parent && !filter ? (
+            <li>
+              <button
+                type="button"
+                className={ROW}
+                onClick={() => setCwd(`${listing.parent}/`.replace(/\/+$/, '/'))}
+              >
+                <span className={TALLY} />
+                <span className={MUTED}>up a level</span>
+              </button>
+            </li>
+          ) : null}
+          {inside.map((entry) => (
+            <li key={entry.path}>
+              <button
+                type="button"
+                className={ROW}
+                onClick={() => setCwd(`${entry.path}/`)}
+              >
+                {/* Blank, so directory names line up under the worked-in ones. */}
+                <span className={TALLY} />
+                <span className="truncate">{entry.name}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+
+        {error ? <p className="m-0 text-[13px] text-warn">{error}</p> : null}
       </form>
     )
   }
