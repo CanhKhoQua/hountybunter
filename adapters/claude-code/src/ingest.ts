@@ -36,9 +36,10 @@ export async function ingestAll(
   const report: IngestReport = { sessions: 0, activities: 0, skippedLines: 0, unknownKinds: {} }
 
   const upsertSession = db.prepare(
-    `INSERT INTO sessions (id, project, started_at, ended_at, branch, model, effort, title, correlation)
-     VALUES (@id, @project_for_insert, @started_at, @ended_at, @branch, @model, @effort, @title, 'exact')
+    `INSERT INTO sessions (id, project, started_at, ended_at, branch, model, effort, title, correlation, parent_id)
+     VALUES (@id, @project_for_insert, @started_at, @ended_at, @branch, @model, @effort, @title, 'exact', @parent_id)
      ON CONFLICT(id) DO UPDATE SET
+       parent_id  = COALESCE(excluded.parent_id, sessions.parent_id),
        project    = COALESCE(@project_observed, sessions.project),
        started_at = COALESCE(sessions.started_at, excluded.started_at),
        ended_at   = COALESCE(excluded.ended_at, sessions.ended_at),
@@ -68,6 +69,7 @@ export async function ingestAll(
     let model: string | null = null
     let effort: string | null = null
     let title: string | null = null
+    let parentId: string | null = null
     let added = 0
 
     db.transaction(() => {
@@ -89,6 +91,12 @@ export async function ingestAll(
         model = str(raw.model) ?? model
         effort = str(raw.effort) ?? effort
         title = str(raw.aiTitle) ?? title
+
+        // A subagent transcript names its parent in `sessionId` while the file
+        // is named for the agent. When the two differ, this run happened inside
+        // another session — read from the record, never guessed from the path.
+        const declared = str(raw.sessionId)
+        if (declared && declared !== file.sessionId) parentId ??= declared
 
         const ts = str(raw.timestamp)
         if (ts) {
@@ -129,6 +137,7 @@ export async function ingestAll(
         model,
         effort,
         title,
+        parent_id: parentId,
       })
 
       // Last, and inside the transaction: the cursor may only advance if the rows

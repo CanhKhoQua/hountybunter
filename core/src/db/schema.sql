@@ -55,9 +55,14 @@ CREATE TABLE IF NOT EXISTS sessions (
   model        TEXT,
   effort       TEXT,
   title        TEXT,
-  correlation  TEXT NOT NULL DEFAULT 'exact'
+  correlation  TEXT NOT NULL DEFAULT 'exact',
+  -- Set when this session is a Task-tool run inside another. The transcript
+  -- says so itself: a subagent file carries its parent in `sessionId` and its
+  -- own id in `agentId`, so nothing here is inferred.
+  parent_id    TEXT
 );
 CREATE INDEX IF NOT EXISTS sessions_project_idx ON sessions(project);
+CREATE INDEX IF NOT EXISTS sessions_parent_idx ON sessions(parent_id);
 
 CREATE TABLE IF NOT EXISTS activities (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,

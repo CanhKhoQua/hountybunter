@@ -75,10 +75,24 @@ export interface SessionHit {
 
 export function listSessions(
   db: Database.Database,
-  opts: { project?: string; limit?: number } = {},
+  opts: { project?: string; limit?: number; parent?: string } = {},
 ): SessionHit[] {
   const params: unknown[] = []
-  if (opts.project) params.push(opts.project)
+  const where: string[] = []
+
+  if (opts.parent) {
+    where.push('s.parent_id = ?')
+    params.push(opts.parent)
+  } else {
+    // Task-tool runs are their own sessions, but there can be dozens per
+    // session and none of them is a thing a person started. They stay out of
+    // the list until asked for by parent.
+    where.push('s.parent_id IS NULL')
+  }
+  if (opts.project) {
+    where.push('s.project = ?')
+    params.push(opts.project)
+  }
   params.push(opts.limit ?? 20)
 
   // SQLite sorts NULL below every value, so DESC already places a session with no
@@ -89,7 +103,7 @@ export function listSessions(
       `SELECT s.id, s.project, s.started_at, s.title,
               (SELECT COUNT(*) FROM activities a WHERE a.session_id = s.id) AS activities
        FROM sessions s
-       ${opts.project ? 'WHERE s.project = ?' : ''}
+       WHERE ${where.join(' AND ')}
        ORDER BY s.started_at DESC, s.id ASC
        LIMIT ?`,
     )
