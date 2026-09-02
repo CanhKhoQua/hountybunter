@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
-import { api, type HuntRow } from '../api.js'
+import { api, type HuntRow, type RegionRow } from '../api.js'
 import { BADGE, BUTTON, FIELD, MUTED } from '../ui/styles.js'
 
 /**
@@ -13,11 +13,27 @@ import { BADGE, BUTTON, FIELD, MUTED } from '../ui/styles.js'
  */
 export function Hunt() {
   const [cwd, setCwd] = useState('')
+  const [grounds, setGrounds] = useState<RegionRow[]>([])
   const [hunt, setHunt] = useState<HuntRow | null>(null)
   const [binding, setBinding] = useState<HuntRow['binding']>(null)
   const [exit, setExit] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
   const host = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    // Ordered by when each was last worked in. The server sorts regions by how
+    // busy they are, which answers a different question than "where was I".
+    api
+      .regions()
+      .then((data) =>
+        setGrounds(
+          data.regions
+            .filter((region) => region.path)
+            .sort((a, b) => (b.lastSeenAt ?? '').localeCompare(a.lastSeenAt ?? '')),
+        ),
+      )
+      .catch(() => setGrounds([]))
+  }, [])
 
   useEffect(() => {
     if (!hunt) return
@@ -80,20 +96,43 @@ export function Hunt() {
     }
   }, [hunt, exit])
 
+  const start = (where: string) => {
+    setError(null)
+    api
+      .startHunt(where)
+      .then((data) => setHunt(data.hunt))
+      .catch((cause: Error) => setError(cause.message))
+  }
+
   if (!hunt) {
     return (
       <form
         className="flex max-w-160 flex-col gap-2"
         onSubmit={(event) => {
           event.preventDefault()
-          setError(null)
-          api
-            .startHunt(cwd)
-            .then((data) => setHunt(data.hunt))
-            .catch((cause: Error) => setError(cause.message))
+          start(cwd)
         }}
       >
-        <label htmlFor="hunt-cwd">Working directory</label>
+        {grounds.length > 0 ? (
+          <>
+            <h2 className="m-0 text-sm font-semibold">Where you have hunted before</h2>
+            <ul className="m-0 flex list-none flex-col gap-1 p-0">
+              {grounds.map((ground) => (
+                <li key={ground.path}>
+                  <button
+                    type="button"
+                    className={`${BUTTON} w-full justify-start text-left`}
+                    onClick={() => start(ground.path!)}
+                  >
+                    Hunt in {ground.name}
+                    <span className={`ml-2 truncate text-[12px] ${MUTED}`}>{ground.path}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : null}
+        <label htmlFor="hunt-cwd">Another directory</label>
         <input
           id="hunt-cwd"
           className={FIELD}

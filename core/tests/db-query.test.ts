@@ -176,6 +176,32 @@ describe('getSession and listActivities', () => {
   })
 })
 
+describe('listRegions with a known directory', () => {
+  it('carries the real path, so a region can be worked in and not only read', () => {
+    db.prepare(
+      `INSERT INTO sessions (id, project, started_at, correlation)
+       VALUES ('s1', 'proj-a', '2026-08-20T10:00:00.000Z', 'exact')`,
+    ).run()
+    db.prepare(
+      `INSERT INTO projects (path, slug, name, last_seen_at)
+       VALUES ('/w/alpha', 'proj-a', 'alpha', '2026-08-20T11:00:00.000Z')`,
+    ).run()
+
+    const alpha = listRegions(db).find((r) => r.project === 'proj-a')
+    expect(alpha).toMatchObject({
+      path: '/w/alpha',
+      name: 'alpha',
+      lastSeenAt: '2026-08-20T11:00:00.000Z',
+    })
+  })
+
+  it('leaves a region no transcript has placed without a path', () => {
+    // A note can name a project that was never ingested. Inventing a directory
+    // for it would offer to start a session somewhere nobody has ever worked.
+    expect(listRegions(db).find((r) => r.project === 'proj-c')?.path).toBe(null)
+  })
+})
+
 describe('listRegions', () => {
   it('counts sessions and notes per project, busiest first', () => {
     db.prepare(
@@ -186,9 +212,9 @@ describe('listRegions', () => {
     ).run()
 
     expect(listRegions(db)).toEqual([
-      { project: 'proj-a', sessions: 2, notes: 2 },
-      { project: 'proj-b', sessions: 1, notes: 1 },
-      { project: 'proj-c', sessions: 0, notes: 1 },
+      { project: 'proj-a', sessions: 2, notes: 2, path: null, name: null, lastSeenAt: null },
+      { project: 'proj-b', sessions: 1, notes: 1, path: null, name: null, lastSeenAt: null },
+      { project: 'proj-c', sessions: 0, notes: 1, path: null, name: null, lastSeenAt: null },
     ])
   })
 

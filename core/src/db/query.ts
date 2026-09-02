@@ -160,6 +160,10 @@ export interface RegionRow {
   project: string
   sessions: number
   notes: number
+  /** The directory sessions here ran in, or null when no transcript placed it. */
+  path: string | null
+  name: string | null
+  lastSeenAt: string | null
 }
 
 /**
@@ -172,8 +176,12 @@ export function listRegions(db: Database.Database): RegionRow[] {
     .prepare(
       `SELECT p.project AS project,
               (SELECT COUNT(*) FROM sessions s WHERE s.project = p.project) AS sessions,
-              (SELECT COUNT(*) FROM notes n WHERE n.project = p.project) AS notes
+              (SELECT COUNT(*) FROM notes n WHERE n.project = p.project) AS notes,
+              d.path AS path,
+              d.name AS name,
+              d.last_seen_at AS lastSeenAt
        FROM (SELECT project FROM sessions UNION SELECT project FROM notes) p
+       LEFT JOIN projects d ON d.slug = p.project
        ORDER BY sessions DESC, p.project ASC`,
     )
     .all() as RegionRow[]

@@ -75,8 +75,10 @@ describe('GET /api/notes', () => {
 describe('GET /api/regions', () => {
   it('reports each project with its session and note counts', async () => {
     const res = await handle('GET', '/api/regions', null, env)
+    // No `projects` row here, so the directory reads as unknown rather than
+    // being invented from the slug — which cannot be turned back into a path.
     expect(res.body.regions).toEqual([
-      { project: 'proj-a', sessions: 1, notes: 1 },
+      { project: 'proj-a', sessions: 1, notes: 1, path: null, name: null, lastSeenAt: null },
     ])
   })
 })

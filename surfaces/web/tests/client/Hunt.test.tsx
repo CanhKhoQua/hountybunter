@@ -36,8 +36,16 @@ const HUNT = {
   binding: null,
 }
 
+/** As the server sends them: busiest first, and one region no transcript placed. */
+const REGIONS = [
+  { project: 'beta-1', sessions: 9, notes: 0, path: '/w/beta', name: 'beta', lastSeenAt: '2026-08-01T10:00:00.000Z' },
+  { project: 'alpha-1', sessions: 2, notes: 0, path: '/w/alpha', name: 'alpha', lastSeenAt: '2026-09-01T10:00:00.000Z' },
+  { project: 'ghost', sessions: 0, notes: 3, path: null, name: null, lastSeenAt: null },
+]
+
 function answer(url: string) {
   if (url === '/api/hunts') return { hunts: [] }
+  if (url === '/api/regions') return { regions: REGIONS }
   if (url.startsWith('/api/hunts/')) return { hunt: HUNT }
   return {}
 }
@@ -84,6 +92,33 @@ async function startHunt() {
 }
 
 describe('Hunt', () => {
+  it('offers the directories already worked in, most recent first', async () => {
+    // The store watched every one of these sessions happen. Making the user
+    // retype a path it already recorded is the tool failing to use what it has.
+    render(<Hunt />)
+    const offered = await screen.findAllByRole('button', { name: /^Hunt in / })
+    expect(offered.map((b) => b.textContent)).toEqual([
+      expect.stringContaining('/w/alpha'),
+      expect.stringContaining('/w/beta'),
+    ])
+  })
+
+  it('does not offer a region no transcript ever placed', async () => {
+    // A note can name a project that was never ingested. Offering it would be
+    // offering to start a session in a directory nobody has established.
+    render(<Hunt />)
+    await screen.findAllByRole('button', { name: /^Hunt in / })
+    expect(screen.queryByRole('button', { name: /ghost/i })).toBe(null)
+  })
+
+  it('starts a hunt in a directory that was picked, not typed', async () => {
+    const user = userEvent.setup()
+    render(<Hunt />)
+    await user.click(await screen.findByRole('button', { name: /^Hunt in alpha/ }))
+    const [, init] = fetchMock.mock.calls.find(([, i]) => i?.method === 'POST')!
+    expect(JSON.parse(init!.body!)).toEqual({ cwd: '/w/alpha' })
+  })
+
   it('starts a hunt in the directory typed and opens its stream', async () => {
     await startHunt()
     const [url, init] = fetchMock.mock.calls.find(([, i]) => i?.method === 'POST')!

@@ -46,6 +46,10 @@ export interface RegionRow {
   project: string
   sessions: number
   notes: number
+  /** Where sessions here ran, or null when no transcript ever placed it. */
+  path: string | null
+  name: string | null
+  lastSeenAt: string | null
 }
 
 export interface HuntRow {
