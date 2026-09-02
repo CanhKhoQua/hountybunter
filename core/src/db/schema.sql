@@ -68,7 +68,6 @@ CREATE TABLE IF NOT EXISTS activities (
   tool_name    TEXT,
   attr_skill   TEXT,
   attr_plugin  TEXT,
-  payload_json TEXT,
   UNIQUE (session_id, seq)
 );
 CREATE INDEX IF NOT EXISTS activities_session_idx ON activities(session_id);

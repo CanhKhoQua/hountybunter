@@ -13,8 +13,9 @@ export interface IngestReport {
 
 /**
  * Record types observed in real transcripts (143 files, 65,831 lines, 2026-08).
- * Anything outside this set is counted and kept with its payload, never dropped —
- * the format is undocumented and will change.
+ * Anything outside this set is counted and still gets a row, never dropped — the
+ * format is undocumented and will change. The record itself stays in the
+ * archive, which is where every record lives now.
  */
 const KNOWN_KINDS = new Set([
   'user', 'assistant', 'attachment', 'system',
@@ -48,8 +49,8 @@ export async function ingestAll(
   )
 
   const insertActivity = db.prepare(
-    `INSERT INTO activities (session_id, seq, ts, kind, tool_name, attr_skill, attr_plugin, payload_json)
-     VALUES (@session_id, @seq, @ts, @kind, @tool_name, @attr_skill, @attr_plugin, @payload_json)
+    `INSERT INTO activities (session_id, seq, ts, kind, tool_name, attr_skill, attr_plugin)
+     VALUES (@session_id, @seq, @ts, @kind, @tool_name, @attr_skill, @attr_plugin)
      ON CONFLICT(session_id, seq) DO NOTHING`,
   )
 
@@ -106,7 +107,6 @@ export async function ingestAll(
           kind: record.kind,
           attr_skill: str(raw.attributionSkill),
           attr_plugin: str(raw.attributionPlugin),
-          payload_json: JSON.stringify(raw),
         }
 
         seq += 1

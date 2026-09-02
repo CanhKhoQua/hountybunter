@@ -64,7 +64,7 @@ export function snapshotState(db: Database.Database): string {
        FROM sessions ORDER BY id`,
     ),
     activities: q(
-      `SELECT session_id, seq, ts, kind, tool_name, attr_skill, attr_plugin, payload_json
+      `SELECT session_id, seq, ts, kind, tool_name, attr_skill, attr_plugin
        FROM activities ORDER BY session_id, seq`,
     ),
   }

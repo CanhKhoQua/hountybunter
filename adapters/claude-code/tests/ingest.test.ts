@@ -73,11 +73,6 @@ describe('ingestAll', () => {
       .all('bbbb-2222')
       .map((r) => (r as { kind: string }).kind)
     expect(kinds).toContain('brand-new-record-type')
-
-    const payload = db
-      .prepare("SELECT payload_json FROM activities WHERE kind = 'brand-new-record-type'")
-      .get() as { payload_json: string }
-    expect(JSON.parse(payload.payload_json).payload).toEqual({ a: 1 })
   })
 
   it('is idempotent — a second run adds nothing', async () => {

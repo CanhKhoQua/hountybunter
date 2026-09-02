@@ -119,3 +119,42 @@ describe('ingest reads the archive, not the agent directory', () => {
     }
   })
 })
+
+describe('the index does not keep a second copy of the transcript', () => {
+  it('has no payload_json column on activities', async () => {
+    // The archive holds every record verbatim. A copy in the index was 98% of
+    // that table, read by nothing, slower to search than grep over the files,
+    // and a second place for whatever the agent read to live.
+    const db = openDb(env)
+    try {
+      const columns = (db.prepare('PRAGMA table_info(activities)').all() as { name: string }[]).map(
+        (c) => c.name,
+      )
+      expect(columns).not.toContain('payload_json')
+    } finally {
+      db.close()
+    }
+  })
+
+  it('still keeps a row for a record type it does not recognise', async () => {
+    // Kept, counted, and recoverable in full from the archive — which is what
+    // "never dropped" has to mean once the payload lives in the file.
+    await writeLive('-w-proj', 'sess-1', [
+      JSON.stringify({ type: 'brand-new-record-type', cwd: '/w/proj', payload: { a: 1 } }),
+    ])
+    await syncArchive(env)
+    const db = openDb(env)
+    try {
+      const report = await ingestAll(db, env)
+      expect(report.unknownKinds['brand-new-record-type']).toBe(1)
+      const kinds = (db.prepare('SELECT kind FROM activities').all() as { kind: string }[]).map(
+        (r) => r.kind,
+      )
+      expect(kinds).toContain('brand-new-record-type')
+    } finally {
+      db.close()
+    }
+    const archived = await readFile(join(transcriptsDir(env), '-w-proj', 'sess-1.jsonl'), 'utf8')
+    expect(JSON.parse(archived.trim()).payload).toEqual({ a: 1 })
+  })
+})
