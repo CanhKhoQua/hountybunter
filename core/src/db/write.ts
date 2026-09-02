@@ -59,6 +59,22 @@ export function indexNote(db: Database.Database, note: Note): void {
   })()
 }
 
+/**
+ * Forget every observed session, so they can be read from the archive again.
+ *
+ * Cursors go with them. Keeping a cursor while dropping the rows it produced
+ * would skip those lines forever; dropping a cursor while keeping the rows
+ * would re-read them under fresh seq numbers, which UNIQUE(session_id, seq)
+ * cannot catch. The two only make sense together.
+ */
+export function clearSessionIndex(db: Database.Database): void {
+  db.transaction(() => {
+    db.prepare('DELETE FROM activities').run()
+    db.prepare('DELETE FROM sessions').run()
+    db.prepare('DELETE FROM ingest_cursors').run()
+  })()
+}
+
 export function clearNoteIndex(db: Database.Database): void {
   db.transaction(() => {
     db.prepare('DELETE FROM notes_fts').run()

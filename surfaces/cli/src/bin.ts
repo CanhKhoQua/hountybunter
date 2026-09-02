@@ -10,6 +10,7 @@ import {
   projectSlug,
   promoteJot,
   readJots,
+  clearSessionIndex,
   rebuildFromDisk,
   replaySpool,
   resolveTimeZone,
@@ -299,18 +300,46 @@ async function cmdIngest(io: Io): Promise<number> {
   }
 }
 
+/**
+ * Rebuild the whole index from what the store already holds: notes from their
+ * markdown, sessions from the transcript archive. Pulling anything new in is
+ * `hb ingest`'s job, not this one's.
+ *
+ * Both halves, because the schema-version error tells the user to delete the
+ * index and rebuild — and an instruction that restores half the index is worse
+ * than none, since `hb list` then reports nothing while the files are right
+ * there.
+ */
+async function rebuildEverything(io: Io): Promise<{ notes: number; sessions: number; errors: string[] }> {
+  const db = openDb(io.env)
+  let sessions: number
+  try {
+    clearSessionIndex(db)
+    sessions = (await ingestAll(db, io.env)).sessions
+  } finally {
+    db.close()
+  }
+  const notes = await rebuildFromDisk(io.env)
+  return {
+    notes: notes.notesIndexed,
+    sessions,
+    errors: notes.errors.map((e) => `${e.sourcePath}: ${e.message}`),
+  }
+}
+
 async function cmdRebuild(args: string[], io: Io): Promise<number> {
   const { values } = parseArgs({ args, options: { verify: { type: 'boolean' } } })
 
-  const report = await rebuildFromDisk(io.env)
-  io.out(`indexed ${report.notesIndexed} note${report.notesIndexed === 1 ? '' : 's'}`)
-  for (const error of report.errors) {
-    io.err(`${error.sourcePath}: ${error.message}`)
-  }
+  const report = await rebuildEverything(io)
+  io.out(
+    `indexed ${report.notes} note${report.notes === 1 ? '' : 's'} and ` +
+      `${report.sessions} session${report.sessions === 1 ? '' : 's'}`,
+  )
+  for (const error of report.errors) io.err(error)
 
   if (values.verify) {
     const first = snapshotState(openDb(io.env))
-    await rebuildFromDisk(io.env)
+    await rebuildEverything(io)
     const second = snapshotState(openDb(io.env))
     if (first !== second) {
       io.err('rebuild is not deterministic — state differed between runs')

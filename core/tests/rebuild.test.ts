@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
+import { clearSessionIndex } from '../src/db/write.js'
 import { openDb } from '../src/db/open.js'
 import { dbPath } from '../src/paths.js'
 import { rebuildFromDisk, snapshotState } from '../src/rebuild.js'
@@ -110,5 +111,41 @@ describe('rebuildFromDisk', () => {
     const after = snapshotState(openDb(env))
 
     expect(after).not.toBe(before)
+  })
+})
+
+describe('clearSessionIndex', () => {
+  it('drops sessions, activities and their cursors together', async () => {
+    const db = openDb(env)
+    try {
+      db.prepare("INSERT INTO sessions (id, project) VALUES ('s1', 'p')").run()
+      db.prepare("INSERT INTO activities (session_id, seq, kind) VALUES ('s1', 1, 'user')").run()
+      db.prepare(
+        "INSERT INTO ingest_cursors (file_path, byte_offset, last_seen_at) VALUES ('/f', 10, 'now')",
+      ).run()
+
+      clearSessionIndex(db)
+
+      const count = (t: string) => (db.prepare(`SELECT COUNT(*) c FROM ${t}`).get() as { c: number }).c
+      // All three or none: a cursor kept without its rows skips those lines
+      // forever, and rows kept without their cursor come back duplicated.
+      expect([count('sessions'), count('activities'), count('ingest_cursors')]).toEqual([0, 0, 0])
+    } finally {
+      db.close()
+    }
+  })
+
+  it('leaves notes alone', async () => {
+    const db = openDb(env)
+    try {
+      db.prepare(
+        `INSERT INTO notes (id, project, path, title, kind, status, hash)
+         VALUES ('n1', 'p', '/n1.md', 't', 'decision', 'standing', 'h')`,
+      ).run()
+      clearSessionIndex(db)
+      expect((db.prepare('SELECT COUNT(*) c FROM notes').get() as { c: number }).c).toBe(1)
+    } finally {
+      db.close()
+    }
   })
 })
