@@ -1,0 +1,18 @@
+{
+  "name": "hountybunter",
+  "owner": {
+    "name": "Loc Nguyen"
+  },
+  "metadata": {
+    "description": "Observes your coding sessions so the reasoning behind a decision survives it"
+  },
+  "plugins": [
+    {
+      "name": "hountybunter",
+      "source": "./",
+      "version": "0.0.0",
+      "description": "Hooks that name the session they came from, so a recorded decision is matched to its transcript exactly rather than guessed. Powered by Claude.",
+      "author": { "name": "Loc Nguyen" }
+    }
+  ]
+}
