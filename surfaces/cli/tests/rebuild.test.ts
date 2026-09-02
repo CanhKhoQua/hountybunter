@@ -69,6 +69,20 @@ describe('hb rebuild restores the whole index', () => {
     expect(counts()).toEqual({ notes: 1, sessions: 1, activities: 2 })
   })
 
+  it('restores where each session ran, not only that it ran', async () => {
+    await rm(join(home, 'index.db'), { force: true })
+    await rm(join(home, 'index.db-shm'), { force: true })
+    await rm(join(home, 'index.db-wal'), { force: true })
+    expect(await runCli(['rebuild'], io)).toBe(0)
+
+    const db = openDb(io.env)
+    try {
+      expect(db.prepare('SELECT path FROM projects').all()).toEqual([{ path: '/w/proj' }])
+    } finally {
+      db.close()
+    }
+  })
+
   it('does not double up when run against an index that is already full', async () => {
     expect(await runCli(['rebuild'], io)).toBe(0)
     expect(counts()).toEqual({ notes: 1, sessions: 1, activities: 2 })

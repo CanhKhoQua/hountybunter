@@ -59,6 +59,7 @@ export function snapshotState(db: Database.Database): string {
     notes_fts: q(
       'SELECT note_id, title, question, chosen, rejected, body FROM notes_fts ORDER BY note_id',
     ),
+    projects: q('SELECT path, slug, name, last_seen_at FROM projects ORDER BY path'),
     sessions: q(
       `SELECT id, project, started_at, ended_at, branch, model, effort, title, correlation
        FROM sessions ORDER BY id`,

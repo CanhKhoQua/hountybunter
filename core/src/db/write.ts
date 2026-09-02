@@ -72,6 +72,9 @@ export function clearSessionIndex(db: Database.Database): void {
     db.prepare('DELETE FROM activities').run()
     db.prepare('DELETE FROM sessions').run()
     db.prepare('DELETE FROM ingest_cursors').run()
+    // Derived from the same transcripts: a project left behind would name a
+    // directory no surviving session ran in.
+    db.prepare('DELETE FROM projects').run()
   })()
 }
 

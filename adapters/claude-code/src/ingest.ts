@@ -49,6 +49,16 @@ export async function ingestAll(
        title      = COALESCE(excluded.title, sessions.title)`,
   )
 
+  // Spec 6.3's `projects`. The slug a session carries is one-way, so without
+  // this the store cannot say where any session actually ran — the one thing
+  // needed to start a new one there.
+  const upsertProject = db.prepare(
+    `INSERT INTO projects (path, slug, name, last_seen_at)
+     VALUES (@path, @slug, @name, @last_seen_at)
+     ON CONFLICT(path) DO UPDATE SET
+       last_seen_at = MAX(COALESCE(excluded.last_seen_at, ''), COALESCE(projects.last_seen_at, ''))`,
+  )
+
   const insertActivity = db.prepare(
     `INSERT INTO activities (session_id, seq, ts, kind, tool_name, attr_skill, attr_plugin)
      VALUES (@session_id, @seq, @ts, @kind, @tool_name, @attr_skill, @attr_plugin)
@@ -63,6 +73,7 @@ export async function ingestAll(
 
     let seq = (maxSeq.get(file.sessionId) as { m: number }).m
     let project: string | null = null
+    let cwdSeen: string | null = null
     let startedAt: string | null = null
     let endedAt: string | null = null
     let branch: string | null = null
@@ -83,6 +94,7 @@ export async function ingestAll(
         const raw = record.raw
         const cwd = str(raw.cwd)
         if (cwd && !project) project = projectSlug(cwd)
+        cwdSeen = cwd ?? cwdSeen
         // Last-wins, matching the upsert's COALESCE(excluded.x, sessions.x). Keeping
         // the first value seen in a run would make incremental ingest converge on the
         // newest and a full re-scan on the oldest, so the index would stop being
@@ -139,6 +151,17 @@ export async function ingestAll(
         title,
         parent_id: parentId,
       })
+
+      // A subagent run reports the same directory as its parent and would only
+      // restate it, so the row is written from the session that owns the cwd.
+      if (cwdSeen) {
+        upsertProject.run({
+          path: cwdSeen,
+          slug: projectSlug(cwdSeen),
+          name: cwdSeen.slice(cwdSeen.lastIndexOf('/') + 1) || cwdSeen,
+          last_seen_at: endedAt,
+        })
+      }
 
       // Last, and inside the transaction: the cursor may only advance if the rows
       // it produced are committed with it.

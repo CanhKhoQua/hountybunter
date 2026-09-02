@@ -114,11 +114,31 @@ describe('rebuildFromDisk', () => {
   })
 })
 
+describe('snapshotState', () => {
+  it('covers where sessions ran, not only that they ran', async () => {
+    // A column absent from the snapshot makes `--verify` blind to it: two
+    // rebuilds that disagree about it still compare identical, which is how a
+    // keystone test comes to prove less than it claims.
+    const db = openDb(env)
+    try {
+      db.prepare(
+        "INSERT INTO projects (path, slug, name, last_seen_at) VALUES ('/w/proj', 'p', 'proj', 'then')",
+      ).run()
+    } finally {
+      // snapshotState closes the handle it is given.
+    }
+    expect(snapshotState(db)).toContain('/w/proj')
+  })
+})
+
 describe('clearSessionIndex', () => {
   it('drops sessions, activities and their cursors together', async () => {
     const db = openDb(env)
     try {
       db.prepare("INSERT INTO sessions (id, project) VALUES ('s1', 'p')").run()
+      db.prepare(
+        "INSERT INTO projects (path, slug, name) VALUES ('/w/proj', 'p', 'proj')",
+      ).run()
       db.prepare("INSERT INTO activities (session_id, seq, kind) VALUES ('s1', 1, 'user')").run()
       db.prepare(
         "INSERT INTO ingest_cursors (file_path, byte_offset, last_seen_at) VALUES ('/f', 10, 'now')",
@@ -129,7 +149,14 @@ describe('clearSessionIndex', () => {
       const count = (t: string) => (db.prepare(`SELECT COUNT(*) c FROM ${t}`).get() as { c: number }).c
       // All three or none: a cursor kept without its rows skips those lines
       // forever, and rows kept without their cursor come back duplicated.
-      expect([count('sessions'), count('activities'), count('ingest_cursors')]).toEqual([0, 0, 0])
+      expect([
+        count('sessions'),
+        count('activities'),
+        count('ingest_cursors'),
+        // Derived from the same transcripts, so it belongs to the same half.
+        // Left behind, it would name a directory no surviving session ran in.
+        count('projects'),
+      ]).toEqual([0, 0, 0, 0])
     } finally {
       db.close()
     }
