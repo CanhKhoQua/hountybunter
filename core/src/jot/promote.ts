@@ -11,6 +11,7 @@ export async function promoteJot(
     rejected?: RejectedOption[]
     evidence?: Evidence[]
     origin?: NoteOrigin
+    supersedes?: string[]
   },
   opts: JotOpts = {},
 ): Promise<Note> {

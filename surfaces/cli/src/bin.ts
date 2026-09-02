@@ -6,6 +6,7 @@ import {
   indexNote,
   listNotes,
   listSessions,
+  markSuperseded,
   openDb,
   projectSlug,
   promoteJot,
@@ -36,6 +37,7 @@ const USAGE = `usage: hb <command>
               [--rejected 'option :: why not']      repeatable
               [--evidence kind:ref]                 kind = file | commit | session | url, repeatable
               [--drafted]                           an agent worded it; you approved it
+              [--supersedes note-id]                retires that note, repeatable
   search <query> [--project P] [--limit N]
   list [--project P] [--status S] [--limit N]
   ingest                              read new Claude Code transcript lines
@@ -146,6 +148,7 @@ async function cmdPromote(args: string[], io: Io): Promise<number> {
       rejected: { type: 'string', multiple: true },
       evidence: { type: 'string', multiple: true },
       drafted: { type: 'boolean' },
+      supersedes: { type: 'string', multiple: true },
     },
   })
 
@@ -179,6 +182,7 @@ async function cmdPromote(args: string[], io: Io): Promise<number> {
       rejected: parseRejected(values.rejected),
       evidence: parseEvidence(values.evidence),
       origin: values.drafted ? 'drafted' : 'authored',
+      supersedes: values.supersedes ?? [],
     },
     { env: io.env, timeZone: io.env.HOUNTYBUNTER_TZ },
   )
@@ -189,6 +193,9 @@ async function cmdPromote(args: string[], io: Io): Promise<number> {
   const db = openDb(io.env)
   try {
     indexNote(db, note)
+    // The replaced notes are marked after the new one is written: a decision
+    // must never be retired before the thing that replaces it exists.
+    for (const id of values.supersedes ?? []) await markSuperseded(db, id, io.env)
   } finally {
     db.close()
   }
