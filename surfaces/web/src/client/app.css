@@ -1,0 +1,240 @@
+/*
+ * One stylesheet, no framework. The class names in the JSX already carry the
+ * meaning; a utility framework would restate the same layout across 500 lines
+ * of working components for identical pixels.
+ *
+ * Layout approved 2026-09-01: a full-height 288px menu that collapses to zero
+ * behind an edge tab, a scene band capped by viewport height, and a panel below
+ * that switches per menu item.
+ */
+
+:root {
+  --ink: #1c1917;
+  --ink-soft: #6b6560;
+  --paper: #faf9f7;
+  --raised: #ffffff;
+  --line: #e2ded9;
+  --accent: #7c5c3e;
+  --warn: #9a6b2f;
+  --pad: 16px;
+  --menu: 288px;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #ece8e3;
+    --ink-soft: #a09a93;
+    --paper: #171614;
+    --raised: #1f1e1b;
+    --line: #33302c;
+    --accent: #c9a227;
+    --warn: #d0a24a;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+/* ---- shell ---------------------------------------------------------- */
+
+.app {
+  display: grid;
+  grid-template-columns: var(--menu) 1fr;
+  height: 100vh;
+  transition: grid-template-columns 140ms ease;
+}
+.app.menu-collapsed { grid-template-columns: 0 1fr; }
+
+.menu {
+  overflow: hidden auto;
+  border-right: 1px solid var(--line);
+  background: var(--raised);
+  padding: var(--pad) 0;
+}
+
+.menu-item {
+  display: block;
+  width: 100%;
+  padding: 10px var(--pad);
+  border: 0;
+  border-left: 3px solid transparent;
+  background: none;
+  color: var(--ink-soft);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.menu-item:hover { color: var(--ink); }
+.menu-item[aria-current='page'] {
+  border-left-color: var(--accent);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* Always mounted: this tab is the only way back once the menu is closed. */
+.menu-tab {
+  position: fixed;
+  top: 50%;
+  left: var(--menu);
+  z-index: 2;
+  width: 18px;
+  height: 44px;
+  margin-top: -22px;
+  border: 1px solid var(--line);
+  border-left: 0;
+  border-radius: 0 4px 4px 0;
+  background: var(--raised);
+  color: var(--ink-soft);
+  cursor: pointer;
+  transition: left 140ms ease;
+}
+.app.menu-collapsed .menu-tab { left: 0; }
+
+.main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* Capped so the panel below is always reachable without scrolling the page. */
+.stage-wrap {
+  flex: 0 0 auto;
+  max-height: 22vh;
+}
+
+.panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--pad) 24px 32px;
+}
+.panel > h2 {
+  margin: 0 0 var(--pad);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+/* ---- lists ---------------------------------------------------------- */
+
+.rows { display: flex; flex-direction: column; }
+
+.row {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr) auto auto;
+  gap: 10px;
+  align-items: baseline;
+  width: 100%;
+  padding: 9px 6px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.row:hover { background: var(--raised); }
+
+.when, .seq, .tail, .tally { color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.branch, .tool, .kind, .sub { color: var(--ink-soft); font-size: 13px; }
+.state { color: var(--ink-soft); }
+.preview { color: var(--ink-soft); grid-column: 2 / -1; }
+
+/* Only a guess is labelled; certainty needs no badge. */
+.badge {
+  padding: 1px 6px;
+  border: 1px solid var(--warn);
+  border-radius: 999px;
+  color: var(--warn);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.empty, .loading, .lost { padding: 12px 0; color: var(--ink-soft); }
+.error { color: #b3261e; }
+.recorded { color: var(--accent); }
+
+.region-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.back {
+  margin-bottom: 12px;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--raised);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.note-detail, .notes-view, .detail { display: block; }
+.note-detail dt, .detail dt { margin-top: 10px; color: var(--ink-soft); font-size: 12px; }
+.note-detail dd, .detail dd { margin: 2px 0 0; }
+.evidence { color: var(--ink-soft); font-size: 13px; }
+.activities { margin-top: var(--pad); }
+
+/* ---- forms ---------------------------------------------------------- */
+
+.form, .record-form, .hunt-start { display: flex; flex-direction: column; gap: 8px; max-width: 640px; }
+.form input, .form textarea,
+.record-form input, .record-form textarea,
+.hunt-start input {
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--raised);
+  color: inherit;
+  font: inherit;
+}
+.form button, .record-form button, .hunt-start button, .form-foot button {
+  align-self: flex-start;
+  padding: 7px 14px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: var(--accent);
+  color: var(--paper);
+  font: inherit;
+  cursor: pointer;
+}
+.form button:disabled, .record-form button:disabled, .hunt-start button:disabled {
+  border-color: var(--line);
+  background: var(--line);
+  color: var(--ink-soft);
+  cursor: not-allowed;
+}
+.form-foot { display: flex; gap: 10px; align-items: center; }
+
+/* ---- the hunt ------------------------------------------------------- */
+
+.hunt { display: flex; flex-direction: column; height: 100%; min-height: 0; gap: 6px; }
+.hunt-meta, .hunt-binding { margin: 0; color: var(--ink-soft); font-size: 13px; }
+.hunt-meta code, .hunt-binding code { color: var(--ink); }
+
+/*
+ * A real box to measure. xterm's fit addon reads this element's size; without a
+ * height it computes a nonsense grid, so this rule is load-bearing, not decor.
+ */
+.terminal {
+  flex: 1 1 auto;
+  min-height: 320px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #101010;
+}
