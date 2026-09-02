@@ -11,6 +11,9 @@ export function serializeNote(note: Note): string {
     id: note.id,
     title: note.title,
     project: note.project,
+    // Beside the slug it is the slug of: together they say one thing, and a
+    // reader who sees only `hountybunter-a70452` cannot tell where that is.
+    ...(note.project_path ? { project_path: note.project_path } : {}),
     kind: note.kind,
     status: note.status,
   }

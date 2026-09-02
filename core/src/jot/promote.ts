@@ -12,6 +12,12 @@ export async function promoteJot(
     evidence?: Evidence[]
     origin?: NoteOrigin
     supersedes?: string[]
+    /**
+     * Where the caller is standing. Recorded only if it hashes to the jot's
+     * project, so promoting from the wrong repository records nothing rather
+     * than a path that opens somewhere else.
+     */
+    projectPath?: string
   },
   opts: JotOpts = {},
 ): Promise<Note> {

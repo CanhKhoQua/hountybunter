@@ -39,6 +39,15 @@ export function noteHash(note: Note): string {
 
 export function indexNote(db: Database.Database, note: Note): void {
   db.transaction(() => {
+    // Where this note's project lives, if the note says so and the claim
+    // checks out. The slug is one-way but verifiable: hashing the path has to
+    // reproduce the project the note claims, or the path describes some other
+    // directory and opening it would open the wrong repository. A note file is
+    // hand-editable, so this is checked here and not only where it is written.
+    if (note.project_path && projectSlug(note.project_path) === note.project) {
+      rememberProject(db, note.project_path)
+    }
+
     db.prepare(
       `INSERT INTO notes (id, project, path, title, kind, status, decided_on,
                           confidence, review_after, hash)

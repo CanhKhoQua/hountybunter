@@ -28,7 +28,7 @@ export class NoteParseError extends Error {
 
 /** Frontmatter keys the schema knows. Everything else is preserved in `extra`. */
 const KNOWN_KEYS = new Set([
-  'id', 'title', 'project', 'kind', 'status', 'decided_on', 'question',
+  'id', 'title', 'project', 'project_path', 'kind', 'status', 'decided_on', 'question',
   'chosen', 'rejected', 'evidence', 'confidence', 'review_after', 'supersedes', 'origin',
 ])
 
@@ -118,6 +118,7 @@ export function parseNote(raw: string, sourcePath: string): Note {
     id: str(data.id) || basename(sourcePath).replace(/\.md$/, ''),
     title: str(data.title) || question,
     project: str(data.project),
+    project_path: str(data.project_path) || null,
     kind: oneOf<NoteKind>(data.kind, NOTE_KINDS, 'kind', sourcePath, 'decision')!,
     status: oneOf<NoteStatus>(data.status, NOTE_STATUSES, 'status', sourcePath, 'standing')!,
     decided_on: dateStr(data.decided_on) || null,

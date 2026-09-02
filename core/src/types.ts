@@ -34,6 +34,16 @@ export interface Note {
   id: string
   title: string
   project: string
+  /**
+   * The directory this note was written in, when the writer knew it.
+   *
+   * `project` is a one-way slug: it says which project a decision belongs to
+   * but never where that project is. A note is a file and the index is
+   * disposable, so the path belongs here rather than only in a row. Null for a
+   * note written before the field existed, or promoted from somewhere other
+   * than the project it is about — absent, never guessed.
+   */
+  project_path: string | null
   kind: NoteKind
   status: NoteStatus
   decided_on: string | null

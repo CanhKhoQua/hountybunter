@@ -183,6 +183,10 @@ async function cmdPromote(args: string[], io: Io): Promise<number> {
       evidence: parseEvidence(values.evidence),
       origin: values.drafted ? 'drafted' : 'authored',
       supersedes: values.supersedes ?? [],
+      // Where the note is being written from. Kept only if it hashes to the
+      // jot's project, so the store learns the directory of a project it knows
+      // only through decisions — and never learns a wrong one.
+      projectPath: io.cwd,
     },
     { env: io.env, timeZone: io.env.HOUNTYBUNTER_TZ },
   )
