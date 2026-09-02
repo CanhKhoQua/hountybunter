@@ -1,5 +1,5 @@
 import { recordDecision } from '../note/record.js'
-import type { Evidence, Note, RejectedOption } from '../types.js'
+import type { Evidence, Note, NoteOrigin, RejectedOption } from '../types.js'
 import type { Jot, JotOpts } from './store.js'
 
 export async function promoteJot(
@@ -10,6 +10,7 @@ export async function promoteJot(
     title?: string
     rejected?: RejectedOption[]
     evidence?: Evidence[]
+    origin?: NoteOrigin
   },
   opts: JotOpts = {},
 ): Promise<Note> {
@@ -22,8 +23,9 @@ export async function promoteJot(
       project: jot.project,
       instant: jot.instant,
       // A jot is a line the user typed and a promotion is answers they filled
-      // in. Nothing on this path is drafted for them.
-      origin: 'authored',
+      // in, so `authored` is the default. A caller says otherwise when an agent
+      // did the wording and the user only approved it.
+      origin: input.origin ?? 'authored',
       body: `${jot.text}\n`,
     },
     { env: opts.env, timeZone: opts.timeZone },

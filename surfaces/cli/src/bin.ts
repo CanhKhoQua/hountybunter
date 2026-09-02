@@ -34,6 +34,7 @@ const USAGE = `usage: hb <command>
   promote <n> --question Q --chosen C [--title T]   n = position in the full list, oldest first
               [--rejected 'option :: why not']      repeatable
               [--evidence kind:ref]                 kind = file | commit | session | url, repeatable
+              [--drafted]                           an agent worded it; you approved it
   search <query> [--project P] [--limit N]
   list [--project P] [--status S] [--limit N]
   ingest                              read new Claude Code transcript lines
@@ -143,6 +144,7 @@ async function cmdPromote(args: string[], io: Io): Promise<number> {
       title: { type: 'string' },
       rejected: { type: 'string', multiple: true },
       evidence: { type: 'string', multiple: true },
+      drafted: { type: 'boolean' },
     },
   })
 
@@ -175,6 +177,7 @@ async function cmdPromote(args: string[], io: Io): Promise<number> {
       title: values.title,
       rejected: parseRejected(values.rejected),
       evidence: parseEvidence(values.evidence),
+      origin: values.drafted ? 'drafted' : 'authored',
     },
     { env: io.env, timeZone: io.env.HOUNTYBUNTER_TZ },
   )

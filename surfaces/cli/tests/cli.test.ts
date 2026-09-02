@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -325,5 +325,35 @@ describe('hb web', () => {
       expect(err.join('\n')).not.toMatch(/at .*\(.*:\d+:\d+\)/)
       expect(err.join('\n').length).toBeGreaterThan(0)
     }
+  })
+})
+
+describe('hb promote --drafted', () => {
+  it('marks a note an agent worded, so the store says who reasoned', async () => {
+    await runCli(['jot', 'bỏ payload_json'], io)
+    await runCli(
+      ['promote', '1', '--question', 'Giữ payload_json?', '--chosen', 'Bỏ', '--drafted'],
+      io,
+    )
+    const written = await readFile(
+      join(home, 'notes', 'myproject-1c9268', '2026-09-01-giu-payload-json.md'),
+      'utf8',
+    ).catch(async () => {
+      // The id carries today's date; find the one file rather than pin the date.
+      const dir = join(home, 'notes')
+      const project = (await readdir(dir))[0]!
+      const file = (await readdir(join(dir, project)))[0]!
+      return readFile(join(dir, project, file), 'utf8')
+    })
+    expect(written).toContain('origin: drafted')
+  })
+
+  it('is authored when the flag is absent', async () => {
+    await runCli(['jot', 'anything'], io)
+    await runCli(['promote', '1', '--question', 'q', '--chosen', 'c'], io)
+    const dir = join(home, 'notes')
+    const project = (await readdir(dir))[0]!
+    const file = (await readdir(join(dir, project)))[0]!
+    expect(await readFile(join(dir, project, file), 'utf8')).toContain('origin: authored')
   })
 })
