@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, realpath } from 'node:fs/promises'
+import { mkdtemp, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
@@ -83,25 +83,26 @@ describe('GET /api/regions', () => {
   })
 })
 
-describe('GET /api/directories', () => {
-  it('lists the directories under the path asked for', async () => {
-    const root = await realpath(await mkdtemp(join(tmpdir(), 'hb-dirs-')))
-    await mkdir(join(root, 'inner'))
-
-    const res = await handle('GET', `/api/directories?path=${encodeURIComponent(root)}`, null, env)
+describe('POST /api/browse', () => {
+  it('answers with the directory the desktop dialog returned', async () => {
+    const res = await handle('POST', '/api/browse', null, {
+      ...env,
+      HOUNTYBUNTER_CHOOSER: 'echo /Users/you/project',
+    } as NodeJS.ProcessEnv)
 
     expect(res.status).toBe(200)
-    expect(res.body.listing).toMatchObject({
-      path: root,
-      entries: [{ name: 'inner', path: join(root, 'inner') }],
-    })
+    expect(res.body).toEqual({ path: '/Users/you/project' })
   })
 
-  it('is a 404 for a path that is not a directory, not an empty listing', async () => {
-    // An empty listing reads as "nothing in here", which invites the user to
-    // start a hunt in a directory that does not exist.
-    const res = await handle('GET', '/api/directories?path=/no/such/place', null, env)
-    expect(res.status).toBe(404)
+  it('answers 200 with no path when the dialog was cancelled', async () => {
+    // Declining to choose is a normal answer, not a failure to report.
+    const res = await handle('POST', '/api/browse', null, {
+      ...env,
+      HOUNTYBUNTER_CHOOSER: 'exit 1',
+    } as NodeJS.ProcessEnv)
+
+    expect(res.status).toBe(200)
+    expect(res.body).toEqual({ path: null })
   })
 })
 

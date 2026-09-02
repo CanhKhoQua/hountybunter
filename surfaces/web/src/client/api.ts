@@ -52,13 +52,6 @@ export interface RegionRow {
   lastSeenAt: string | null
 }
 
-export interface Listing {
-  path: string
-  /** One level up, or null at the filesystem root. */
-  parent: string | null
-  entries: { name: string; path: string }[]
-}
-
 export interface HuntRow {
   id: string
   pid: number
@@ -91,10 +84,8 @@ export const api = {
     get<{ notes: NoteHit[] }>(query ? `/api/notes?q=${encodeURIComponent(query)}` : '/api/notes'),
   note: (id: string) => get<{ note: Note }>(`/api/notes/${encodeURIComponent(id)}`),
   regions: () => get<{ regions: RegionRow[] }>('/api/regions'),
-  directories: (path?: string) =>
-    get<{ listing: Listing }>(
-      path ? `/api/directories?path=${encodeURIComponent(path)}` : '/api/directories',
-    ),
+  /** Opens the desktop folder chooser. `path` is null when it was cancelled. */
+  browse: () => post<{ path: string | null }>('/api/browse', {}),
   hunt: (id: string) => get<{ hunt: HuntRow }>(`/api/hunts/${encodeURIComponent(id)}`),
   startHunt: (cwd: string) => post<{ hunt: HuntRow }>('/api/hunts', { cwd: cwd.trim() }),
   sendInput: (id: string, data: string) =>

@@ -14,7 +14,7 @@ import {
 import type { Evidence, RejectedOption } from '@hountybunter/core'
 import { statSync } from 'node:fs'
 import { bindHunt, latestHookId, type Binding } from '@hountybunter/adapter-claude-code'
-import { listDirectories } from './directories.js'
+import { chooseDirectory } from './choose.js'
 import { HuntRegistry, type Hunt } from './hunts.js'
 
 export interface Response {
@@ -87,6 +87,13 @@ export async function handle(
   if (method === 'POST' && path === '/hook') return receiveHook(body, env)
   if (method === 'POST' && path === '/api/notes') return recordNote(body as DecisionBody, env)
 
+  // POST, because it opens a dialog on the desktop: asking twice is not the
+  // same as asking once. A cancelled dialog is a 200 with no path, not an
+  // error — declining to choose is a normal answer.
+  if (method === 'POST' && path === '/api/browse') {
+    return { status: 200, body: { path: await chooseDirectory(env) } }
+  }
+
   const hunted = path.match(/^\/api\/hunts(?:\/([^/]+))?(?:\/(stream|input|resize))?$/)
   if (hunted) {
     const [, id, action] = hunted
@@ -129,14 +136,6 @@ export async function handle(
       return { status: 200, body: { regions: listRegions(db) } }
     }
 
-    if (path === '/api/directories') {
-      const asked = params.get('path') ?? undefined
-      const listing = await listDirectories(asked, env)
-      // 404 rather than an empty listing: "nothing in here" would invite the
-      // user to start a hunt in a directory that does not exist.
-      if (!listing) return { status: 404, body: { error: `no directory ${asked ?? 'at home'}` } }
-      return { status: 200, body: { listing } }
-    }
 
     return { status: 404, body: { error: `no route for ${method} ${path}` } }
   } finally {

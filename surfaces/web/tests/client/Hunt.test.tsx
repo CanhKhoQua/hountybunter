@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Terminal } from '@xterm/xterm'
 import { Hunt } from '../../src/client/views/Hunt.js'
@@ -43,34 +43,20 @@ const REGIONS = [
   { project: 'ghost', sessions: 0, notes: 3, path: null, name: null, lastSeenAt: null },
 ]
 
-/** Two levels, so descending and coming back up are both testable. */
-const TREE: Record<string, unknown> = {
-  '/home': {
-    path: '/home',
-    parent: null,
-    entries: [{ name: 'Developer', path: '/home/Developer' }],
-  },
-  '/home/Developer': {
-    path: '/home/Developer',
-    parent: '/home',
-    entries: [{ name: 'hountybunter', path: '/home/Developer/hountybunter' }],
-  },
-}
+/** What the desktop chooser answered, or null for a cancelled dialog. */
+let chosen: string | null = '/home/Developer/hountybunter'
 
 function answer(url: string) {
   if (url === '/api/hunts') return { hunts: [] }
   if (url === '/api/regions') return { regions: REGIONS }
-  if (url.startsWith('/api/directories')) {
-    const asked = new URL(url, 'http://x').searchParams.get('path') ?? '/home'
-    // The server resolves with realpath, which drops a trailing slash. The
-    // client sends one when it descends, so the fixture has to drop it too.
-    return { listing: TREE[asked.replace(/(.)\/+$/, '$1')] }
-  }
   if (url.startsWith('/api/hunts/')) return { hunt: HUNT }
   return {}
 }
 
 beforeEach(() => {
+  // Reset, or one test cancelling the dialog decides what every later test
+  // sees — a pass that depends on file order proves nothing.
+  chosen = '/home/Developer/hountybunter'
   written = []
   onDataHandlers = []
   FakeEventSource.last = null
@@ -89,6 +75,9 @@ beforeEach(() => {
   fetchMock = vi.fn(async (url: string, init?: { method?: string; body?: string }) => {
     if (init?.method === 'POST' && url === '/api/hunts') {
       return { ok: true, status: 201, json: async () => ({ hunt: HUNT }) }
+    }
+    if (init?.method === 'POST' && url === '/api/browse') {
+      return { ok: true, status: 200, json: async () => ({ path: chosen }) }
     }
     return { ok: true, status: 200, json: async () => answer(url) }
   })
@@ -111,80 +100,63 @@ async function startHunt() {
   return user
 }
 
-/** The one list of places, so a row is never confused with the start button. */
-const places = () => within(screen.getByRole('list'))
 
 describe('Hunt', () => {
-  it('puts the places you work and the places you can go in one list', async () => {
-    // Two lists side by side make the user decide which one to look in before
-    // they can look. Both answer "where", so both belong in one column.
-    render(<Hunt timeZone="UTC" />)
-    await waitFor(() => expect(places().getByText('Developer')).toBeTruthy())
-    expect(places().getByText('alpha')).toBeTruthy()
-    expect(places().getByText('beta')).toBeTruthy()
-  })
-
-  it('reads the tail of the path as a filter over that one list', async () => {
-    // One rule for the field: up to the last slash is the directory, after it
-    // is a filter. Paste, type and browse then all use the same control.
+  it('fills the field from the desktop chooser', async () => {
+    // Browse is one button and one dialog. A page cannot learn the absolute
+    // path of a directory a person picks, so the server opens the chooser.
     const user = userEvent.setup()
     render(<Hunt timeZone="UTC" />)
-    await user.type(await screen.findByLabelText(/directory/i), '/home/Developer/houn')
+    await user.click(screen.getByRole('button', { name: /browse/i }))
 
-    await waitFor(() => expect(places().getByText('hountybunter')).toBeTruthy())
-    expect(places().queryByText('alpha')).toBe(null)
+    await waitFor(() =>
+      expect((screen.getByLabelText(/directory/i) as HTMLInputElement).value).toBe(
+        '/home/Developer/hountybunter',
+      ),
+    )
   })
 
-  it('reaches a directory that has never been worked in', async () => {
-    // Recents can only offer places already visited. This tool's own
-    // repository had zero sessions in it and was unreachable by that route.
+  it('leaves the field alone when the dialog is cancelled', async () => {
+    // Closing a chooser is how a person says "not this". Clearing what they
+    // had typed would punish them for looking.
+    chosen = null
     const user = userEvent.setup()
     render(<Hunt timeZone="UTC" />)
-    await user.click(await waitFor(() => places().getByText('Developer')))
-    expect(await waitFor(() => places().getByText('hountybunter'))).toBeTruthy()
+    await user.type(await screen.findByLabelText(/directory/i), '/w/typed')
+    await user.click(screen.getByRole('button', { name: /browse/i }))
+
+    expect((screen.getByLabelText(/directory/i) as HTMLInputElement).value).toBe('/w/typed')
   })
 
-  it('offers the way up, and not from the root', async () => {
-    const user = userEvent.setup()
+  it('lists where you work, so the common case needs no dialog at all', async () => {
     render(<Hunt timeZone="UTC" />)
-    // '/home' reports no parent, so there is nowhere above it to offer.
-    await waitFor(() => expect(places().getByText('Developer')).toBeTruthy())
-    expect(places().queryByText(/up a level/i)).toBe(null)
-
-    await user.click(places().getByText('Developer'))
-    await user.click(await waitFor(() => places().getByText(/up a level/i)))
-    expect(await waitFor(() => places().getByText('Developer'))).toBeTruthy()
+    await waitFor(() => expect(screen.getByText('alpha')).toBeTruthy())
+    expect(screen.getByText('beta')).toBeTruthy()
+    // A note can name a project never ingested; offering it would offer to
+    // start a session in a directory nobody has established.
+    expect(screen.queryByText(/ghost/i)).toBe(null)
   })
 
-  it('never offers a region no transcript ever placed', async () => {
-    // A note can name a project that was never ingested. Offering it would be
-    // offering to start a session in a directory nobody has established.
-    render(<Hunt timeZone="UTC" />)
-    await waitFor(() => expect(places().getByText('Developer')).toBeTruthy())
-    expect(places().queryByText(/ghost/i)).toBe(null)
-  })
-
-  it('starts exactly the path in the field, and a picked row fills it', async () => {
+  it('starts exactly the path in the field, and a listed row fills it', async () => {
     // The field is the only source of truth for where a hunt starts. A row
     // that started one directly would make two controls answer one question.
     const user = userEvent.setup()
     render(<Hunt timeZone="UTC" />)
-    await user.click(await waitFor(() => places().getByText('alpha')))
+    await user.click(await waitFor(() => screen.getByText('alpha')))
 
-    const field = await screen.findByLabelText(/directory/i)
-    expect((field as HTMLInputElement).value).toBe('/w/alpha')
+    expect((screen.getByLabelText(/directory/i) as HTMLInputElement).value).toBe('/w/alpha')
 
     await user.click(screen.getByRole('button', { name: /^start hunt/i }))
-    const [, init] = fetchMock.mock.calls.find(([, i]) => i?.method === 'POST')!
-    expect(JSON.parse(init!.body!)).toEqual({ cwd: '/w/alpha' })
+    const call = fetchMock.mock.calls.find(([u, i]) => u === '/api/hunts' && i?.method === 'POST')!
+    expect(JSON.parse(call[1]!.body!)).toEqual({ cwd: '/w/alpha' })
   })
 
   it('names the directory it is about to start in', async () => {
-    // "Start hunt" alone does not say where, and the path above it is long
-    // enough to be scrolled past.
+    // "Start hunt" alone does not say where, and the path beside it is long
+    // enough to be read past.
     const user = userEvent.setup()
     render(<Hunt timeZone="UTC" />)
-    await user.click(await waitFor(() => places().getByText('alpha')))
+    await user.click(await waitFor(() => screen.getByText('alpha')))
     expect(screen.getByRole('button', { name: /start hunt in alpha/i })).toBeTruthy()
   })
 

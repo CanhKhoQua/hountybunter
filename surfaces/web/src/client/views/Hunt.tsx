@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
-import { api, calendarDate, type HuntRow, type Listing, type RegionRow } from '../api.js'
-import { BADGE, BUTTON, FIELD, MUTED, ROW, TALLY } from '../ui/styles.js'
+import { api, calendarDate, type HuntRow, type RegionRow } from '../api.js'
+import { BACK, BADGE, BUTTON, FIELD, MUTED, ROW, TALLY } from '../ui/styles.js'
 
 /**
  * A live agent session, in a real terminal.
@@ -14,7 +14,6 @@ import { BADGE, BUTTON, FIELD, MUTED, ROW, TALLY } from '../ui/styles.js'
 export function Hunt({ timeZone }: { timeZone: string }) {
   const [cwd, setCwd] = useState('')
   const [grounds, setGrounds] = useState<RegionRow[]>([])
-  const [listing, setListing] = useState<Listing | null>(null)
   const [hunt, setHunt] = useState<HuntRow | null>(null)
   const [binding, setBinding] = useState<HuntRow['binding']>(null)
   const [exit, setExit] = useState<number | null>(null)
@@ -36,19 +35,15 @@ export function Hunt({ timeZone }: { timeZone: string }) {
       .catch(() => setGrounds([]))
   }, [])
 
-  // The field is the only place that says where the list is looking: everything
-  // up to its last slash is the directory, so browsing and typing are one act.
-  const cut = cwd.lastIndexOf('/')
-  const dir = cut >= 0 ? cwd.slice(0, cut + 1) : undefined
-
-  useEffect(() => {
+  const browse = () => {
+    setError(null)
     api
-      .directories(dir)
-      .then((data) => setListing(data.listing))
-      // A path that cannot be listed leaves the list where it was. Emptying it
-      // would read as "nothing in here" for what is only a half-typed name.
-      .catch(() => undefined)
-  }, [dir])
+      .browse()
+      // A cancelled dialog leaves the field alone: the user closed it rather
+      // than choosing nothing.
+      .then((data) => data.path && setCwd(data.path))
+      .catch((cause: Error) => setError(cause.message))
+  }
 
   useEffect(() => {
     if (!hunt) return
@@ -122,9 +117,6 @@ export function Hunt({ timeZone }: { timeZone: string }) {
   if (!hunt) {
     const target = cwd.trim().replace(/\/+$/, '')
     const named = target.slice(target.lastIndexOf('/') + 1)
-    const filter = cwd.slice(cwd.lastIndexOf('/') + 1).toLowerCase()
-    const worked = grounds.filter((g) => g.name!.toLowerCase().includes(filter))
-    const inside = (listing?.entries ?? []).filter((e) => e.name.toLowerCase().includes(filter))
 
     return (
       <form
@@ -144,59 +136,44 @@ export function Hunt({ timeZone }: { timeZone: string }) {
               className={`${FIELD} grow font-mono text-[13px]`}
               value={cwd}
               onChange={(event) => setCwd(event.target.value)}
-              placeholder={listing?.path ?? '/Users/you/project'}
+              placeholder="/Users/you/project"
               spellCheck={false}
               autoComplete="off"
             />
+            {/* The desktop's own chooser, opened by the server. A page cannot
+                learn the absolute path of a directory a person picks. */}
+            <button type="button" className={BACK} onClick={browse}>
+              Browse…
+            </button>
             <button type="submit" className={BUTTON} disabled={!target}>
-              {/* A control says what it does, and where. The path above is long
-                  enough to be read past. */}
+              {/* A control says what it does, and where. The path beside it is
+                  long enough to be read past. */}
               {named ? `Start hunt in ${named}` : 'Start hunt'}
             </button>
           </div>
-          <p className={`m-0 text-[12px] ${MUTED}`}>
-            Type or paste a path. Anything after the last slash filters the list.
-          </p>
         </div>
 
-        {/* One list, one column of names. Rows are the app's own list row, not
-            buttons: a screen of filled accent bars has no primary action left. */}
-        <ul className="m-0 flex max-h-96 list-none flex-col overflow-y-auto p-0">
-          {worked.map((ground) => (
-            <li key={ground.path}>
-              <button type="button" className={ROW} onClick={() => setCwd(ground.path!)}>
+        {grounds.length > 0 ? (
+          <div className="flex flex-col">
+            <h2 className={`m-0 pb-1 text-[12px] uppercase tracking-wide ${MUTED}`}>
+              Where you work
+            </h2>
+            {/* The app's own list row, not buttons: a screen of filled accent
+                bars leaves no primary action on it. */}
+            {grounds.map((ground) => (
+              <button
+                key={ground.path}
+                type="button"
+                className={ROW}
+                onClick={() => setCwd(ground.path!)}
+              >
                 <span className={TALLY}>{calendarDate(ground.lastSeenAt, timeZone)}</span>
                 <span className="truncate">{ground.name}</span>
                 <span className={`truncate text-[12px] ${MUTED}`}>{ground.path}</span>
               </button>
-            </li>
-          ))}
-          {listing?.parent && !filter ? (
-            <li>
-              <button
-                type="button"
-                className={ROW}
-                onClick={() => setCwd(`${listing.parent}/`.replace(/\/+$/, '/'))}
-              >
-                <span className={TALLY} />
-                <span className={MUTED}>up a level</span>
-              </button>
-            </li>
-          ) : null}
-          {inside.map((entry) => (
-            <li key={entry.path}>
-              <button
-                type="button"
-                className={ROW}
-                onClick={() => setCwd(`${entry.path}/`)}
-              >
-                {/* Blank, so directory names line up under the worked-in ones. */}
-                <span className={TALLY} />
-                <span className="truncate">{entry.name}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
+            ))}
+          </div>
+        ) : null}
 
         {error ? <p className="m-0 text-[13px] text-warn">{error}</p> : null}
       </form>
