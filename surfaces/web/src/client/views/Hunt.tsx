@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
-import { api, type HuntRow, type RegionRow } from '../api.js'
+import { api, type HuntRow, type Listing, type RegionRow } from '../api.js'
 import { BADGE, BUTTON, FIELD, MUTED } from '../ui/styles.js'
 
 /**
@@ -14,6 +14,7 @@ import { BADGE, BUTTON, FIELD, MUTED } from '../ui/styles.js'
 export function Hunt() {
   const [cwd, setCwd] = useState('')
   const [grounds, setGrounds] = useState<RegionRow[]>([])
+  const [listing, setListing] = useState<Listing | null>(null)
   const [hunt, setHunt] = useState<HuntRow | null>(null)
   const [binding, setBinding] = useState<HuntRow['binding']>(null)
   const [exit, setExit] = useState<number | null>(null)
@@ -33,6 +34,12 @@ export function Hunt() {
         ),
       )
       .catch(() => setGrounds([]))
+  }, [])
+
+  useEffect(() => {
+    browse()
+    // Home, once. Where the browser goes after that is the user's business.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
@@ -96,6 +103,15 @@ export function Hunt() {
     }
   }, [hunt, exit])
 
+  const browse = (where?: string) => {
+    api
+      .directories(where)
+      .then((data) => setListing(data.listing))
+      // A directory that cannot be listed leaves the browser where it was,
+      // rather than emptying it and reading as "nothing in here".
+      .catch(() => undefined)
+  }
+
   const start = (where: string) => {
     setError(null)
     api
@@ -126,6 +142,41 @@ export function Hunt() {
                   >
                     Hunt in {ground.name}
                     <span className={`ml-2 truncate text-[12px] ${MUTED}`}>{ground.path}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : null}
+        {listing ? (
+          <>
+            <h2 className="m-0 text-sm font-semibold">Anywhere else</h2>
+            <div className="flex items-center gap-2">
+              <code className="grow truncate text-[12px]">{listing.path}</code>
+              <button type="button" className={BUTTON} onClick={() => start(listing.path)}>
+                Hunt here
+              </button>
+            </div>
+            <ul className="m-0 flex max-h-64 list-none flex-col gap-1 overflow-y-auto p-0">
+              {listing.parent ? (
+                <li>
+                  <button
+                    type="button"
+                    className={`${BUTTON} w-full justify-start text-left`}
+                    onClick={() => browse(listing.parent!)}
+                  >
+                    Up one level
+                  </button>
+                </li>
+              ) : null}
+              {listing.entries.map((entry) => (
+                <li key={entry.path}>
+                  <button
+                    type="button"
+                    className={`${BUTTON} w-full justify-start text-left`}
+                    onClick={() => browse(entry.path)}
+                  >
+                    Open {entry.name}
                   </button>
                 </li>
               ))}

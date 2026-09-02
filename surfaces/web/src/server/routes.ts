@@ -14,6 +14,7 @@ import {
 import type { Evidence, RejectedOption } from '@hountybunter/core'
 import { statSync } from 'node:fs'
 import { bindHunt, latestHookId, type Binding } from '@hountybunter/adapter-claude-code'
+import { listDirectories } from './directories.js'
 import { HuntRegistry, type Hunt } from './hunts.js'
 
 export interface Response {
@@ -126,6 +127,15 @@ export async function handle(
 
     if (path === '/api/regions') {
       return { status: 200, body: { regions: listRegions(db) } }
+    }
+
+    if (path === '/api/directories') {
+      const asked = params.get('path') ?? undefined
+      const listing = await listDirectories(asked, env)
+      // 404 rather than an empty listing: "nothing in here" would invite the
+      // user to start a hunt in a directory that does not exist.
+      if (!listing) return { status: 404, body: { error: `no directory ${asked ?? 'at home'}` } }
+      return { status: 200, body: { listing } }
     }
 
     return { status: 404, body: { error: `no route for ${method} ${path}` } }

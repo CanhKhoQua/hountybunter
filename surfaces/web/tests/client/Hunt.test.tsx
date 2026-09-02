@@ -43,9 +43,27 @@ const REGIONS = [
   { project: 'ghost', sessions: 0, notes: 3, path: null, name: null, lastSeenAt: null },
 ]
 
+/** Two levels, so descending and coming back up are both testable. */
+const TREE: Record<string, unknown> = {
+  '/home': {
+    path: '/home',
+    parent: null,
+    entries: [{ name: 'Developer', path: '/home/Developer' }],
+  },
+  '/home/Developer': {
+    path: '/home/Developer',
+    parent: '/home',
+    entries: [{ name: 'hountybunter', path: '/home/Developer/hountybunter' }],
+  },
+}
+
 function answer(url: string) {
   if (url === '/api/hunts') return { hunts: [] }
   if (url === '/api/regions') return { regions: REGIONS }
+  if (url.startsWith('/api/directories')) {
+    const asked = new URL(url, 'http://x').searchParams.get('path') ?? '/home'
+    return { listing: TREE[asked] }
+  }
   if (url.startsWith('/api/hunts/')) return { hunt: HUNT }
   return {}
 }
@@ -92,6 +110,37 @@ async function startHunt() {
 }
 
 describe('Hunt', () => {
+  it('browses the filesystem, so a directory never worked in is reachable', async () => {
+    // The recents list can only ever offer places already visited. The tool's
+    // own repository had 0 sessions in it and was therefore unreachable.
+    const user = userEvent.setup()
+    render(<Hunt />)
+    await user.click(await screen.findByRole('button', { name: /^Open Developer/ }))
+    expect(await screen.findByRole('button', { name: /^Open hountybunter/ })).toBeTruthy()
+  })
+
+  it('offers to go back up, and does not at the root', async () => {
+    const user = userEvent.setup()
+    render(<Hunt />)
+    // '/home' has no parent, so there is nothing to go up to yet.
+    await screen.findByRole('button', { name: /^Open Developer/ })
+    expect(screen.queryByRole('button', { name: /up one level/i })).toBe(null)
+
+    await user.click(screen.getByRole('button', { name: /^Open Developer/ }))
+    await user.click(await screen.findByRole('button', { name: /up one level/i }))
+    expect(await screen.findByRole('button', { name: /^Open Developer/ })).toBeTruthy()
+  })
+
+  it('starts a hunt in the directory being browsed', async () => {
+    const user = userEvent.setup()
+    render(<Hunt />)
+    await user.click(await screen.findByRole('button', { name: /^Open Developer/ }))
+    await user.click(await screen.findByRole('button', { name: /hunt here/i }))
+
+    const [, init] = fetchMock.mock.calls.find(([, i]) => i?.method === 'POST')!
+    expect(JSON.parse(init!.body!)).toEqual({ cwd: '/home/Developer' })
+  })
+
   it('offers the directories already worked in, most recent first', async () => {
     // The store watched every one of these sessions happen. Making the user
     // retype a path it already recorded is the tool failing to use what it has.
