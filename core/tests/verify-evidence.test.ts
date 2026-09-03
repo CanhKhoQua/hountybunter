@@ -80,6 +80,11 @@ describe('file evidence', () => {
       { projectPath: dir, baseline: undefined, sessionExists: never },
     )
     expect(result.state).toBe('unknown')
+    // The guard returns before anything is read. Without this line the test
+    // passes on a host whose tmpdir is shallow enough that `../../etc/hosts`
+    // resolves to the real file: hashing it succeeds, and with no baseline the
+    // state is `unknown` either way.
+    expect(result.hash).toBeUndefined()
   })
 })
 
