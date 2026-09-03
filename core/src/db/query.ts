@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3'
+import type { Note } from '../types.js'
 
 export interface NoteHit {
   id: string
@@ -221,6 +222,45 @@ export interface RegionRow {
   path: string | null
   name: string | null
   lastSeenAt: string | null
+  /** Notes in this project with a reference that was checked and found wanting. */
+  stale: number
+}
+
+/**
+ * The notes with a reference that was checked and found wanting, or whose
+ * review date has passed.
+ *
+ * `unknown` is excluded on purpose: a reference nobody could check is not
+ * evidence of anything. `review_after` is a `YYYY-MM-DD` string, so a string
+ * compare against `today` is a date compare; it is strictly `<` because on
+ * the date itself a note is not yet due. The clock is the caller's — this
+ * function never reaches for `new Date()` itself.
+ */
+export function staleNoteIds(db: Database.Database, today: string): Set<string> {
+  const rows = db
+    .prepare(
+      `SELECT note_id FROM note_evidence WHERE state IN ('changed', 'missing')
+       UNION
+       SELECT id AS note_id FROM notes WHERE review_after IS NOT NULL AND review_after < ?`,
+    )
+    .all(today) as { note_id: string }[]
+  return new Set(rows.map((r) => r.note_id))
+}
+
+/**
+ * Where a note's project lives.
+ *
+ * The note's own `project_path` is what its author saw when they wrote it, so
+ * it wins; the `projects` row is the fallback for notes written before that
+ * field existed. Null when neither answers — which the caller must read as
+ * "cannot check", never as "nothing changed".
+ */
+export function projectPathFor(db: Database.Database, note: Note): string | null {
+  if (note.project_path) return note.project_path
+  const row = db.prepare('SELECT path FROM projects WHERE slug = ?').get(note.project) as
+    | { path: string }
+    | undefined
+  return row?.path ?? null
 }
 
 /**
@@ -230,7 +270,7 @@ export interface RegionRow {
  */
 export function listRegions(
   db: Database.Database,
-  opts: { limit?: number; offset?: number } = {},
+  opts: { limit?: number; offset?: number; today: string },
 ): RegionRow[] {
   return db
     .prepare(
@@ -239,15 +279,20 @@ export function listRegions(
               (SELECT COUNT(*) FROM notes n WHERE n.project = p.project) AS notes,
               d.path AS path,
               d.name AS name,
-              d.last_seen_at AS lastSeenAt
+              d.last_seen_at AS lastSeenAt,
+              (SELECT COUNT(DISTINCT n2.id)
+                 FROM notes n2 LEFT JOIN note_evidence e ON e.note_id = n2.id
+                WHERE n2.project = p.project
+                  AND (e.state IN ('changed', 'missing')
+                       OR (n2.review_after IS NOT NULL AND n2.review_after < @today))) AS stale
        FROM (SELECT project FROM sessions UNION SELECT project FROM notes) p
        LEFT JOIN projects d ON d.slug = p.project
        ORDER BY sessions DESC, p.project ASC
-       LIMIT ? OFFSET ?`,
+       LIMIT @limit OFFSET @offset`,
     )
     // Unlimited by default. Both the CLI and the region grid read the whole
     // list, and a cap nobody asked for is the bug this paging exists to end.
-    .all(opts.limit ?? -1, opts.offset ?? 0) as RegionRow[]
+    .all({ today: opts.today, limit: opts.limit ?? -1, offset: opts.offset ?? 0 }) as RegionRow[]
 }
 
 /**

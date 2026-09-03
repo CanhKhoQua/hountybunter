@@ -4,6 +4,7 @@ import { basename } from 'node:path'
 import { serializeNote } from '../note/serialize.js'
 import { projectSlug } from '../paths.js'
 import type { Note } from '../types.js'
+import type { NoteVerdict } from '../verify/note.js'
 
 /**
  * Record that work happens in `path`, so the store can name a directory and
@@ -95,6 +96,25 @@ export function indexNote(db: Database.Database, note: Note): void {
       note.body,
     )
   })()
+}
+
+/**
+ * Store what a verification found.
+ *
+ * Evidence rows are owned by `indexNote`, which deletes and re-inserts them, so
+ * a verdict written here lives exactly as long as the reading that produced it:
+ * re-indexing a note drops it back to `unknown`, which is the honest answer
+ * until something looks again.
+ */
+export function recordVerification(db: Database.Database, verdict: NoteVerdict, at: string): void {
+  const update = db.prepare(
+    `UPDATE note_evidence SET state = ?, last_verified_at = ?
+     WHERE note_id = ? AND kind = ? AND ref = ?`,
+  )
+  const all = db.transaction(() => {
+    for (const ref of verdict.refs) update.run(ref.state, at, verdict.noteId, ref.kind, ref.ref)
+  })
+  all()
 }
 
 /**

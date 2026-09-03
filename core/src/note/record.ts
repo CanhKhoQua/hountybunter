@@ -66,6 +66,7 @@ export async function recordDecision(input: DecisionInput, opts: RecordOpts = {}
     chosen,
     rejected: input.rejected ?? [],
     evidence: input.evidence ?? [],
+    verified: null,
     confidence: null,
     review_after: null,
     origin: input.origin,

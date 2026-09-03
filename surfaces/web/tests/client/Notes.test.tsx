@@ -105,6 +105,113 @@ describe('Notes', () => {
 
     expect(screen.getByText(/no matches/i)).toBeTruthy()
   })
+
+  it('marks a note whose evidence no longer matches', async () => {
+    stub(() => ({ notes: [{ ...LIST.notes[0], stale: true }], total: 1 }))
+    await act(async () => { render(<Notes />) })
+
+    expect(screen.getByText(/stale/i)).toBeTruthy()
+  })
+
+  it('says what each piece of evidence was found to be', async () => {
+    // One verdict for the whole note would hide which reference moved.
+    stub((url) =>
+      url.includes('/api/notes/')
+        ? {
+            note: {
+              ...DETAIL.note,
+              stale: true,
+              evidence: [
+                { kind: 'file', ref: 'src/a.ts', state: 'changed' },
+                { kind: 'url', ref: 'https://e.invalid', state: 'unknown' },
+              ],
+            },
+          }
+        : LIST,
+    )
+    await act(async () => { render(<Notes />) })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Which basemap/ }))
+    })
+
+    expect(screen.getByText(/changed since you confirmed it/i)).toBeTruthy()
+    expect(screen.getByText(/not checked/i)).toBeTruthy()
+  })
+
+  it('can say a stale note still holds', async () => {
+    const calls: string[] = []
+    const staleNote = {
+      ...DETAIL.note,
+      stale: true,
+      evidence: [{ kind: 'file', ref: 'src/a.ts', state: 'changed' }],
+    }
+    // The acknowledge call answers with a different note than the GET did, so
+    // the test can tell whether the view actually adopted the response rather
+    // than just firing the request and leaving the old note on screen.
+    const clearedNote = {
+      ...DETAIL.note,
+      stale: false,
+      evidence: [{ kind: 'file', ref: 'src/a.ts', state: 'verified' }],
+    }
+    vi.stubGlobal('fetch', vi.fn((url: string, init?: { method?: string }) => {
+      const method = init?.method ?? 'GET'
+      calls.push(`${method} ${url}`)
+      return Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve(
+            method === 'POST'
+              ? { note: clearedNote }
+              : String(url).includes('/api/notes/')
+                ? { note: staleNote }
+                : LIST,
+          ),
+      })
+    }))
+    await act(async () => { render(<Notes />) })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Which basemap/ }))
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /still true/i }))
+    })
+
+    expect(calls).toContain(`POST /api/notes/${DETAIL.note.id}/verified`)
+    // The acknowledged note comes back clean, so the view must stop showing it
+    // as stale. Asserting only that a POST went out would pass even if the
+    // button fired a request and then left the screen alone.
+    expect(screen.queryByRole('button', { name: /still true/i })).toBe(null)
+    expect(screen.getByText(/unchanged since you confirmed it/i)).toBeTruthy()
+  })
+
+  it('colours evidence by whether it is a reason the note is stale, not by whether it could be checked', async () => {
+    // `unknown` means nobody could check, not that something is wrong — it
+    // must not carry the same warning colour as `changed` or `missing`.
+    stub((url) =>
+      url.includes('/api/notes/')
+        ? {
+            note: {
+              ...DETAIL.note,
+              stale: true,
+              evidence: [
+                { kind: 'file', ref: 'src/a.ts', state: 'changed' },
+                { kind: 'url', ref: 'https://e.invalid', state: 'unknown' },
+              ],
+            },
+          }
+        : LIST,
+    )
+    await act(async () => { render(<Notes />) })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Which basemap/ }))
+    })
+
+    const changed = screen.getByText(/changed since you confirmed it/i)
+    const unknown = screen.getByText(/not checked/i)
+
+    expect(changed.className).toMatch(/text-warn/)
+    expect(unknown.className).not.toMatch(/text-warn/)
+  })
 })
 
 describe('Regions', () => {

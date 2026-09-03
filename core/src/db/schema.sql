@@ -32,7 +32,10 @@ CREATE TABLE IF NOT EXISTS note_evidence (
   kind              TEXT NOT NULL,
   ref               TEXT NOT NULL,
   last_verified_at  TEXT,
-  ok                INTEGER NOT NULL DEFAULT 1,
+  -- verified | changed | missing | unknown. Defaults to unknown because
+  -- indexing a note is not checking it, and a default that read as a pass
+  -- would report a store nobody has looked at as a clean one.
+  state             TEXT NOT NULL DEFAULT 'unknown',
   PRIMARY KEY (note_id, kind, ref)
 );
 

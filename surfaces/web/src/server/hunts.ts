@@ -88,7 +88,11 @@ export class HuntRegistry {
 
     const agent = spawnAgent(opts)
     const id = randomUUID()
-    const listeners = new Set<{ data: (chunk: string) => void; end?: () => void }>()
+    // `at` is the position to resume after, handed to every listener alongside
+    // the bytes. The element type went un-updated when it was added, and
+    // `tsc -b`'s incremental cache kept the mismatch invisible until an
+    // unrelated change to `core` forced this project to be re-checked.
+    const listeners = new Set<{ data: (chunk: string, at: number) => void; end?: () => void }>()
     let buffered = ''
     // Everything ever produced, counted. `buffered` keeps only the tail, so it
     // cannot say where in the output a client has got to.

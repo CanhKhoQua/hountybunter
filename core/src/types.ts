@@ -30,6 +30,29 @@ export interface Evidence {
   ref: string
 }
 
+/** One `file` reference and the digest it carried when a human last confirmed it. */
+export interface VerifiedRef {
+  ref: string
+  hash: string
+}
+
+/**
+ * What the tool measured, as opposed to what the note's author declared.
+ *
+ * Kept out of `evidence` on purpose: that list is a human record, and folding
+ * machine bookkeeping into it erodes the thing that makes a note worth reading.
+ * The two are matched on `ref`.
+ *
+ * Only `file` references appear. A commit either resolves or it does not, and a
+ * session either is in the index or is not; neither has a prior value worth
+ * writing down. `url` references are never verified at all.
+ */
+export interface Verified {
+  /** The calendar date a human last confirmed the note, `YYYY-MM-DD`. */
+  on: string
+  refs: VerifiedRef[]
+}
+
 export interface Note {
   id: string
   title: string
@@ -51,6 +74,8 @@ export interface Note {
   chosen: string
   rejected: RejectedOption[]
   evidence: Evidence[]
+  /** Null for a note nobody has confirmed yet — absent, never assumed fresh. */
+  verified: Verified | null
   confidence: Confidence | null
   review_after: string | null
   /** Null for a note written before the channel was recorded — absent, not assumed. */

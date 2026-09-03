@@ -237,7 +237,7 @@ describe('listRegions with a known directory', () => {
        VALUES ('/w/alpha', 'proj-a', 'alpha', '2026-08-20T11:00:00.000Z')`,
     ).run()
 
-    const alpha = listRegions(db).find((r) => r.project === 'proj-a')
+    const alpha = listRegions(db, { today: '2026-09-02' }).find((r) => r.project === 'proj-a')
     expect(alpha).toMatchObject({
       path: '/w/alpha',
       name: 'alpha',
@@ -248,7 +248,7 @@ describe('listRegions with a known directory', () => {
   it('leaves a region no transcript has placed without a path', () => {
     // A note can name a project that was never ingested. Inventing a directory
     // for it would offer to start a session somewhere nobody has ever worked.
-    expect(listRegions(db).find((r) => r.project === 'proj-c')?.path).toBe(null)
+    expect(listRegions(db, { today: '2026-09-02' }).find((r) => r.project === 'proj-c')?.path).toBe(null)
   })
 })
 
@@ -261,23 +261,46 @@ describe('listRegions', () => {
               ('s3', 'proj-b', '2026-08-22T10:00:00.000Z', 'exact')`,
     ).run()
 
-    expect(listRegions(db)).toEqual([
-      { project: 'proj-a', sessions: 2, notes: 2, path: null, name: null, lastSeenAt: null },
-      { project: 'proj-b', sessions: 1, notes: 1, path: null, name: null, lastSeenAt: null },
-      { project: 'proj-c', sessions: 0, notes: 1, path: null, name: null, lastSeenAt: null },
+    expect(listRegions(db, { today: '2026-09-02' })).toEqual([
+      { project: 'proj-a', sessions: 2, notes: 2, path: null, name: null, lastSeenAt: null, stale: 0 },
+      { project: 'proj-b', sessions: 1, notes: 1, path: null, name: null, lastSeenAt: null, stale: 0 },
+      { project: 'proj-c', sessions: 0, notes: 1, path: null, name: null, lastSeenAt: null, stale: 0 },
     ])
+  })
+
+  it('counts the stale notes in each region, so fog can thicken with the ratio', () => {
+    // n1 belongs to proj-a in this file's fixture. Give it a row to move.
+    db.prepare(
+      `INSERT OR IGNORE INTO note_evidence (note_id, kind, ref) VALUES ('n1', 'file', 'a.ts')`,
+    ).run()
+    db.prepare(`UPDATE note_evidence SET state = 'missing' WHERE note_id = 'n1'`).run()
+
+    const byProject = Object.fromEntries(listRegions(db, { today: '2026-09-02' }).map((r) => [r.project, r.stale]))
+    expect(byProject['proj-a']).toBe(1)
+    expect(byProject['proj-b']).toBe(0)
+  })
+
+  it('counts a note whose review date has passed as stale, even with no evidence state to blame', () => {
+    // n2 belongs to proj-a and has no note_evidence rows at all — the review
+    // date is the only thing that could make it stale.
+    db.prepare(`UPDATE notes SET review_after = '2026-09-01' WHERE id = 'n2'`).run()
+
+    const byProject = Object.fromEntries(
+      listRegions(db, { today: '2026-09-02' }).map((r) => [r.project, r.stale]),
+    )
+    expect(byProject['proj-a']).toBe(1)
   })
 
   it('includes a project that has notes but no session yet', () => {
-    expect(listRegions(db).map((r) => r.project)).toContain('proj-c')
+    expect(listRegions(db, { today: '2026-09-02' }).map((r) => r.project)).toContain('proj-c')
   })
 
   it('walks the list a page at a time, in the same order', () => {
-    expect(listRegions(db, { limit: 2, offset: 0 }).map((r) => r.project)).toEqual([
+    expect(listRegions(db, { limit: 2, offset: 0, today: '2026-09-02' }).map((r) => r.project)).toEqual([
       'proj-a',
       'proj-b',
     ])
-    expect(listRegions(db, { limit: 2, offset: 2 }).map((r) => r.project)).toEqual(['proj-c'])
+    expect(listRegions(db, { limit: 2, offset: 2, today: '2026-09-02' }).map((r) => r.project)).toEqual(['proj-c'])
   })
 
   it('counts the regions a page could be taken from', () => {
@@ -289,6 +312,6 @@ describe('listRegions', () => {
   it('lists every region when no page is asked for', () => {
     // The default has to stay unlimited: the CLI and the region grid both read
     // the whole list, and a silent cap here is the bug this work is about.
-    expect(listRegions(db)).toHaveLength(countRegions(db))
+    expect(listRegions(db, { today: '2026-09-02' })).toHaveLength(countRegions(db))
   })
 })

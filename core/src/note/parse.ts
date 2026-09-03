@@ -13,6 +13,7 @@ import {
   type NoteOrigin,
   type NoteStatus,
   type RejectedOption,
+  type Verified,
 } from '../types.js'
 
 export class NoteParseError extends Error {
@@ -29,7 +30,7 @@ export class NoteParseError extends Error {
 /** Frontmatter keys the schema knows. Everything else is preserved in `extra`. */
 const KNOWN_KEYS = new Set([
   'id', 'title', 'project', 'project_path', 'kind', 'status', 'decided_on', 'question',
-  'chosen', 'rejected', 'evidence', 'confidence', 'review_after', 'supersedes', 'origin',
+  'chosen', 'rejected', 'evidence', 'verified', 'confidence', 'review_after', 'supersedes', 'origin',
 ])
 
 function str(value: unknown): string {
@@ -91,6 +92,28 @@ function parseEvidence(value: unknown): Evidence[] {
   })
 }
 
+function parseVerified(value: unknown): Verified | null {
+  if (value == null || typeof value !== 'object' || Array.isArray(value)) return null
+  const record = value as Record<string, unknown>
+  const refs = Array.isArray(record.refs)
+    ? record.refs.flatMap((entry) => {
+        if (entry == null || typeof entry !== 'object') return []
+        const row = entry as Record<string, unknown>
+        const ref = str(row.ref)
+        // A nameless baseline matches no evidence row, so it can only mislead.
+        if (!ref) return []
+        const hash = str(row.hash)
+        // A hand-edited entry with no hash is not the same as one with an
+        // empty-string hash: `''` is not `undefined`, so it would compare
+        // unequal to any real hash and read as `changed` — a false stale from
+        // exactly the hand-editing this tolerance exists for.
+        if (!hash) return []
+        return [{ ref, hash }]
+      })
+    : []
+  return { on: dateStr(record.on), refs }
+}
+
 function parseStringList(value: unknown): string[] {
   if (!Array.isArray(value)) return []
   return value.map(str).filter(Boolean)
@@ -126,6 +149,7 @@ export function parseNote(raw: string, sourcePath: string): Note {
     chosen,
     rejected: parseRejected(data.rejected),
     evidence: parseEvidence(data.evidence),
+    verified: parseVerified(data.verified),
     confidence: oneOf<Confidence>(data.confidence, CONFIDENCES, 'confidence', sourcePath, null),
     review_after: dateStr(data.review_after) || null,
     supersedes: parseStringList(data.supersedes),

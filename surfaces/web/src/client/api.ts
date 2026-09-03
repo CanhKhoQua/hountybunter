@@ -30,6 +30,7 @@ export interface NoteHit {
   kind: string
   status: string
   snippet: string
+  stale: boolean
 }
 
 export interface Note {
@@ -39,13 +40,19 @@ export interface Note {
   chosen: string
   status: string
   rejected: { option: string; why_not: string }[]
-  evidence: { kind: string; ref: string }[]
+  stale: boolean
+  evidence: {
+    kind: string
+    ref: string
+    state: 'verified' | 'changed' | 'missing' | 'unknown'
+  }[]
 }
 
 export interface RegionRow {
   project: string
   sessions: number
   notes: number
+  stale: number
   /** Where sessions here ran, or null when no transcript ever placed it. */
   path: string | null
   name: string | null
@@ -114,6 +121,9 @@ export const api = {
     return get<{ notes: NoteHit[]; total?: number }>(`/api/notes${search ? `?${search}` : ''}`)
   },
   note: (id: string) => get<{ note: Note }>(`/api/notes/${encodeURIComponent(id)}`),
+  /** Records that a human looked and the note still holds. Rewrites its file. */
+  acknowledgeNote: (id: string) =>
+    post<{ note: Note }>(`/api/notes/${encodeURIComponent(id)}/verified`, {}),
   regions: (page?: Page) =>
     get<{ regions: RegionRow[]; total: number }>(`/api/regions${pageQuery(page)}`),
   /** Opens the desktop folder chooser. `path` is null when it was cancelled. */

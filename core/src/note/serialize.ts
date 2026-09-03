@@ -23,6 +23,7 @@ export function serializeNote(note: Note): string {
   data.chosen = note.chosen
   if (note.rejected.length > 0) data.rejected = note.rejected
   if (note.evidence.length > 0) data.evidence = note.evidence
+  if (note.verified) data.verified = note.verified
   if (note.confidence) data.confidence = note.confidence
   if (note.review_after) data.review_after = note.review_after
   if (note.supersedes.length > 0) data.supersedes = note.supersedes
