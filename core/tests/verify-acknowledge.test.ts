@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { parseNote } from '../src/note/parse.js'
 import { serializeNote } from '../src/note/serialize.js'
-import { writeNote } from '../src/note/store.js'
+import { readAllNotes, writeNote } from '../src/note/store.js'
 import { rebuildFromDisk } from '../src/rebuild.js'
 import { acknowledgeNote } from '../src/verify/acknowledge.js'
 import { verifyNote } from '../src/verify/note.js'
@@ -63,17 +63,21 @@ describe('acknowledgeNote', () => {
 
   it('leaves a baseline that survives the index being thrown away', async () => {
     // The point of putting it in the file: rebuildFromDisk clears the tables.
+    // Re-reading through the real pipeline — readAllNotes, then verifyNote —
+    // rather than a raw readFile is what makes this test able to fail: a
+    // baseline kept only in a table rebuildFromDisk truncates would come back
+    // as `unknown` here, where a bare parse of the file would not notice.
     await writeFile(join(project, 'a.ts'), 'x\n')
     await writeNote(note(), env)
-    const acked = await acknowledgeNote(note(), deps(), env)
+    await acknowledgeNote(note(), deps(), env)
 
     const report = await rebuildFromDisk(env)
     expect(report.errors).toEqual([])
-    const reread = parseNote(
-      await readFile(join(home, 'notes', 'proj-a', 'n1.md'), 'utf8'),
-      acked.sourcePath,
-    )
-    expect(reread.verified).toEqual(acked.verified)
+
+    const { notes } = await readAllNotes(env)
+    const reread = notes.find((n) => n.id === 'n1')!
+    const verdict = await verifyNote(reread, deps())
+    expect(verdict.refs.find((r) => r.ref === 'a.ts')!.state).toBe('verified')
   })
 
   it('records nothing for a file it could not read, rather than a hash of nothing', async () => {
