@@ -7,6 +7,7 @@ import { runCli, type Io } from '../src/bin.js'
 
 let home: string
 let project: string
+let transcripts: string
 let out: string[]
 let err: string[]
 let io: Io
@@ -14,12 +15,19 @@ let io: Io
 beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), 'hb-cli-verify-'))
   project = await mkdtemp(join(tmpdir(), 'hb-cli-proj-'))
+  // Without this, transcriptRoot falls back to the real ~/.claude/projects and
+  // `hb ingest` walks the user's actual transcripts on every test run.
+  transcripts = await mkdtemp(join(tmpdir(), 'hb-cli-transcripts-'))
   out = []
   err = []
   io = {
     out: (l) => out.push(l),
     err: (l) => err.push(l),
-    env: { HOUNTYBUNTER_HOME: home, HOUNTYBUNTER_TZ: 'UTC' } as NodeJS.ProcessEnv,
+    env: {
+      HOUNTYBUNTER_HOME: home,
+      HOUNTYBUNTER_TZ: 'UTC',
+      HOUNTYBUNTER_TRANSCRIPTS: transcripts,
+    } as NodeJS.ProcessEnv,
     cwd: project,
   }
 
