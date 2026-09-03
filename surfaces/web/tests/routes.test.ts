@@ -342,6 +342,17 @@ describe('staleness over the API', () => {
     expect(res.body.note.verified.on).toMatch(/^\d{4}-\d{2}-\d{2}$/)
   })
 
+  it('answers an acknowledgement in the same shape as the detail route, with per-evidence state and stale', async () => {
+    // The client feeds this response straight into the same view that renders
+    // GET /api/notes/:id. A bare core Note here — {kind, ref} with no state,
+    // and no top-level `stale` — left every evidence row blank after "Still
+    // true" was clicked.
+    const res = await handle('POST', '/api/notes/n1/verified', {}, env)
+
+    expect(res.body.note.evidence[0]).toMatchObject({ kind: 'file', ref: 'a.ts', state: 'unknown' })
+    expect(res.body.note.stale).toBe(false)
+  })
+
   it('404s an acknowledgement for a note that is not in the store', async () => {
     expect((await handle('POST', '/api/notes/nope/verified', {}, env)).status).toBe(404)
   })

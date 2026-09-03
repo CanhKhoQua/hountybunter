@@ -18,11 +18,13 @@ import {
   projectPathFor,
   receiveHookEvent,
   recordDecision,
+  recordVerification,
   resolveTimeZone,
   searchNotes,
   staleNoteIds,
+  verifyNote,
 } from '@hountybunter/core'
-import type { Evidence, RejectedOption } from '@hountybunter/core'
+import type { Evidence, Note, RejectedOption } from '@hountybunter/core'
 import { statSync } from 'node:fs'
 import { bindHunt, latestHookId, type Binding } from '@hountybunter/adapter-claude-code'
 import { chooseDirectory } from './choose.js'
@@ -111,6 +113,29 @@ function publicHunt(hunt: Hunt, command: string, binding: Binding | null = null)
 }
 
 /**
+ * A note as the wire sends it: each reference carrying the state the last
+ * verification found, and one `stale` flag for the whole note.
+ *
+ * The detail route and the acknowledge route both send this shape. Extracted
+ * to one place so they cannot drift apart — which is how an acknowledged note
+ * used to reach the client with no `state` on its evidence at all.
+ */
+function shapeNoteForWire(db: ReturnType<typeof openDb>, note: Note, today: string) {
+  const states = new Map(
+    (
+      db
+        .prepare('SELECT kind, ref, state FROM note_evidence WHERE note_id = ?')
+        .all(note.id) as { kind: string; ref: string; state: string }[]
+    ).map((r) => [`${r.kind}:${r.ref}`, r.state]),
+  )
+  const evidence = note.evidence.map((e) => ({
+    ...e,
+    state: states.get(`${e.kind}:${e.ref}`) ?? 'unknown',
+  }))
+  return { ...note, evidence, stale: staleNoteIds(db, today).has(note.id) }
+}
+
+/**
  * Maps a method and path to a plain response. Deliberately knows nothing about
  * node:http, so every endpoint is testable without opening a socket.
  */
@@ -190,7 +215,8 @@ export async function handle(
     if (path === '/api/notes') {
       const query = params.get('q')?.trim()
       const { limit, offset } = page(params, 50)
-      const stale = staleNoteIds(db)
+      const today = calendarDate(nowIso(), resolveTimeZone(env))
+      const stale = staleNoteIds(db, today)
       // A search is ranked by relevance and capped by the limit; paging into
       // rank is not a window a reader can hold, so only the plain list pages.
       if (query) {
@@ -212,28 +238,16 @@ export async function handle(
 
       // Each reference carries its own state: one verdict for the whole note
       // would hide which citation is the one that moved.
-      const states = new Map(
-        (
-          db
-            .prepare('SELECT kind, ref, state FROM note_evidence WHERE note_id = ?')
-            .all(id) as { kind: string; ref: string; state: string }[]
-        ).map((r) => [`${r.kind}:${r.ref}`, r.state]),
-      )
-      const evidence = note.evidence.map((e) => ({
-        ...e,
-        state: states.get(`${e.kind}:${e.ref}`) ?? 'unknown',
-      }))
-      return {
-        status: 200,
-        body: { note: { ...note, evidence, stale: staleNoteIds(db).has(id) } },
-      }
+      const today = calendarDate(nowIso(), resolveTimeZone(env))
+      return { status: 200, body: { note: shapeNoteForWire(db, note, today) } }
     }
 
     if (path === '/api/regions') {
       const { limit, offset } = page(params, 100)
+      const today = calendarDate(nowIso(), resolveTimeZone(env))
       return {
         status: 200,
-        body: { regions: listRegions(db, { limit, offset }), total: countRegions(db) },
+        body: { regions: listRegions(db, { limit, offset, today }), total: countRegions(db) },
       }
     }
 
@@ -313,17 +327,26 @@ async function acknowledge(id: string, env: NodeJS.ProcessEnv): Promise<Response
     if (!note) return { status: 404, body: { error: `no note ${id}` } }
 
     const hasSession = db.prepare('SELECT 1 FROM sessions WHERE id = ?')
+    const sessionExists = (sid: string) => hasSession.get(sid) !== undefined
+    const today = calendarDate(nowIso(), resolveTimeZone(env))
     const acked = await acknowledgeNote(
       note,
-      {
-        projectPath: projectPathFor(db, note),
-        sessionExists: (sid: string) => hasSession.get(sid) !== undefined,
-        today: calendarDate(nowIso(), resolveTimeZone(env)),
-      },
+      { projectPath: projectPathFor(db, note), sessionExists, today },
       env,
     )
     indexNote(db, acked)
-    return { status: 200, body: { note: acked } }
+    // indexNote resets every evidence row to `unknown` — it has no way to know
+    // what acknowledgeNote just measured. Re-verifying and recording that
+    // keeps the index from contradicting the check that just happened, and
+    // gives the client back evidence that reads as freshly confirmed rather
+    // than unchecked.
+    const verdict = await verifyNote(acked, {
+      projectPath: projectPathFor(db, acked),
+      sessionExists,
+      today,
+    })
+    recordVerification(db, verdict, nowIso())
+    return { status: 200, body: { note: shapeNoteForWire(db, acked, today) } }
   } finally {
     db.close()
   }

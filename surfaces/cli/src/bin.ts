@@ -397,18 +397,24 @@ async function cmdVerify(args: string[], io: Io): Promise<number> {
 
     if (ack) {
       const hasSession = db.prepare('SELECT 1 FROM sessions WHERE id = ?')
+      const sessionExists = (id: string) => hasSession.get(id) !== undefined
       const today = calendarDate(nowIso(), resolveTimeZone(io.env))
       for (const note of targets) {
         const acked = await acknowledgeNote(
           note,
-          {
-            projectPath: projectPathFor(db, note),
-            sessionExists: (id: string) => hasSession.get(id) !== undefined,
-            today,
-          },
+          { projectPath: projectPathFor(db, note), sessionExists, today },
           io.env,
         )
         indexNote(db, acked)
+        // indexNote resets every evidence row to `unknown`, which would
+        // contradict what acknowledgeNote just measured — the same
+        // re-verify-and-record the web surface's ack route does.
+        const verdict = await verifyNote(acked, {
+          projectPath: projectPathFor(db, acked),
+          sessionExists,
+          today,
+        })
+        recordVerification(db, verdict, nowIso())
         io.out(`confirmed ${acked.id}`)
       }
       return 0

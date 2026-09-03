@@ -71,14 +71,38 @@ describe('staleNoteIds', () => {
     recordVerification(db, verdict('n2', 'b.ts', 'missing'), at)
     recordVerification(db, verdict('n3', 'c.ts', 'verified'), at)
 
-    expect(staleNoteIds(db)).toEqual(new Set(['n1', 'n2']))
+    expect(staleNoteIds(db, '2026-09-02')).toEqual(new Set(['n1', 'n2']))
   })
 
   it('leaves out a note whose references merely could not be checked', () => {
     indexNote(db, note('n1', 'a.ts'))
     recordVerification(db, verdict('n1', 'a.ts', 'unknown'), at)
 
-    expect(staleNoteIds(db)).toEqual(new Set())
+    expect(staleNoteIds(db, '2026-09-02')).toEqual(new Set())
+  })
+
+  it('names a note whose review date has passed, even with every reference unknown', () => {
+    const withReviewAfter = parseNote(
+      `---\nid: n1\ntitle: n1\nproject: proj-a\nquestion: q?\nchosen: c\n` +
+        `review_after: 2026-09-01\nevidence:\n  - {kind: file, ref: a.ts}\n---\n\nb\n`,
+      '/store/n1.md',
+    )
+    indexNote(db, withReviewAfter)
+    recordVerification(db, verdict('n1', 'a.ts', 'unknown'), at)
+
+    expect(staleNoteIds(db, '2026-09-02')).toEqual(new Set(['n1']))
+  })
+
+  it('leaves out a note whose review date is today, not yet due', () => {
+    const withReviewAfter = parseNote(
+      `---\nid: n1\ntitle: n1\nproject: proj-a\nquestion: q?\nchosen: c\n` +
+        `review_after: 2026-09-02\nevidence:\n  - {kind: file, ref: a.ts}\n---\n\nb\n`,
+      '/store/n1.md',
+    )
+    indexNote(db, withReviewAfter)
+    recordVerification(db, verdict('n1', 'a.ts', 'unknown'), at)
+
+    expect(staleNoteIds(db, '2026-09-02')).toEqual(new Set())
   })
 })
 
