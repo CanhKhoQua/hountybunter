@@ -108,4 +108,28 @@ describe('verifyNote', () => {
 
     expect(verdict.reasons).toEqual(['missing', 'review-due'])
   })
+
+  it('puts a changed reference before a missing one, and says each once', async () => {
+    // The order is part of what `reasons` promises, and swapping the two
+    // pushes that build it would otherwise go unnoticed: no other test has a
+    // changed reference and a missing one at the same time.
+    await writeFile(join(dir, 'a.ts'), 'x\n')
+    await writeFile(join(dir, 'b.ts'), 'y\n')
+    const verdict = await verifyNote(
+      note(
+        'evidence:\n' +
+          '  - {kind: file, ref: a.ts}\n' +
+          '  - {kind: file, ref: b.ts}\n' +
+          '  - {kind: file, ref: gone.ts}\n' +
+          'verified:\n  on: 2026-09-01\n  refs:\n' +
+          '    - {ref: a.ts, hash: sha256:stale}\n' +
+          '    - {ref: b.ts, hash: sha256:also-stale}\n' +
+          '    - {ref: gone.ts, hash: sha256:x}\n',
+      ),
+      { projectPath: dir, sessionExists: never, today: '2026-09-02' },
+    )
+
+    expect(verdict.refs.map((r) => r.state)).toEqual(['changed', 'changed', 'missing'])
+    expect(verdict.reasons).toEqual(['changed', 'missing'])
+  })
 })
