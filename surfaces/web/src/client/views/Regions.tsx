@@ -50,6 +50,9 @@ export function Regions() {
               floor, to repeat what this line already says.
             */}
             <span className={MUTED}>{region.notes ? 'surveyed' : 'unsurveyed'}</span>
+            {region.stale > 0 ? (
+              <span className="text-[13px] text-warn">{region.stale} stale</span>
+            ) : null}
           </article>
         ))}
       </div>

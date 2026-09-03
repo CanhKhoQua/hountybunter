@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { api, type Note, type NoteHit } from '../api.js'
 import { Pager } from '../ui/Pager.js'
-import { BACK, FIELD, MUTED, ROW, TALLY } from '../ui/styles.js'
+import { BACK, BADGE, FIELD, MUTED, ROW, TALLY } from '../ui/styles.js'
 
 /** Notes per page. */
 const PAGE = 50
@@ -45,7 +45,13 @@ export function Notes() {
         />
       </form>
 
-      {open ? <Detail note={open} onBack={() => setOpen(null)} /> : null}
+      {open ? (
+        <Detail
+          note={open}
+          onBack={() => setOpen(null)}
+          onStillTrue={(id) => { void api.acknowledgeNote(id).then((d) => setOpen(d.note)) }}
+        />
+      ) : null}
 
       {!open && hits && hits.length === 0 ? (
         <p className={`py-3 ${MUTED}`}>No matches.</p>
@@ -63,6 +69,7 @@ export function Notes() {
                 {hit.title}
               </span>
               <span className={TALLY}>{hit.status}</span>
+              {hit.stale ? <span className={BADGE}>stale</span> : null}
             </button>
           ))
         : null}
@@ -76,7 +83,23 @@ export function Notes() {
   )
 }
 
-function Detail({ note, onBack }: { note: Note; onBack: () => void }) {
+/** What each state means, said to a reader rather than to a database. */
+const EVIDENCE_SAYS: Record<string, string> = {
+  verified: 'unchanged since you confirmed it',
+  changed: 'changed since you confirmed it',
+  missing: 'no longer there',
+  unknown: 'not checked',
+}
+
+function Detail({
+  note,
+  onBack,
+  onStillTrue,
+}: {
+  note: Note
+  onBack: () => void
+  onStillTrue: (id: string) => void
+}) {
   return (
     <article>
       <button type="button" className={`${BACK} mb-3`} onClick={onBack}>
@@ -100,13 +123,24 @@ function Detail({ note, onBack }: { note: Note; onBack: () => void }) {
         </p>
       ))}
 
-      <ul className={`mt-3 text-[13px] ${MUTED}`}>
+      <ul className={`m-0 mt-3 list-none p-0 text-[13px] ${MUTED}`}>
         {note.evidence.map((item) => (
-          <li key={`${item.kind}:${item.ref}`}>
-            {item.kind}:{item.ref}
+          <li key={`${item.kind}:${item.ref}`} className="flex items-baseline gap-2 py-0.5">
+            <span className="truncate">
+              {item.kind}:{item.ref}
+            </span>
+            <span className={item.state === 'verified' ? MUTED : 'text-warn'}>
+              {EVIDENCE_SAYS[item.state]}
+            </span>
           </li>
         ))}
       </ul>
+
+      {note.stale ? (
+        <button type="button" className={`${BACK} mt-3`} onClick={() => onStillTrue(note.id)}>
+          Still true
+        </button>
+      ) : null}
     </article>
   )
 }

@@ -105,6 +105,69 @@ describe('Notes', () => {
 
     expect(screen.getByText(/no matches/i)).toBeTruthy()
   })
+
+  it('marks a note whose evidence no longer matches', async () => {
+    stub(() => ({ notes: [{ ...LIST.notes[0], stale: true }], total: 1 }))
+    await act(async () => { render(<Notes />) })
+
+    expect(screen.getByText(/stale/i)).toBeTruthy()
+  })
+
+  it('says what each piece of evidence was found to be', async () => {
+    // One verdict for the whole note would hide which reference moved.
+    stub((url) =>
+      url.includes('/api/notes/')
+        ? {
+            note: {
+              ...DETAIL.note,
+              stale: true,
+              evidence: [
+                { kind: 'file', ref: 'src/a.ts', state: 'changed' },
+                { kind: 'url', ref: 'https://e.invalid', state: 'unknown' },
+              ],
+            },
+          }
+        : LIST,
+    )
+    await act(async () => { render(<Notes />) })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Which basemap/ }))
+    })
+
+    expect(screen.getByText(/changed since you confirmed it/i)).toBeTruthy()
+    expect(screen.getByText(/not checked/i)).toBeTruthy()
+  })
+
+  it('can say a stale note still holds', async () => {
+    const calls: string[] = []
+    vi.stubGlobal('fetch', vi.fn((url: string, init?: { method?: string }) => {
+      calls.push(`${init?.method ?? 'GET'} ${url}`)
+      return Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve(
+            String(url).includes('/api/notes/')
+              ? {
+                  note: {
+                    ...DETAIL.note,
+                    stale: true,
+                    evidence: [{ kind: 'file', ref: 'src/a.ts', state: 'changed' }],
+                  },
+                }
+              : LIST,
+          ),
+      })
+    }))
+    await act(async () => { render(<Notes />) })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Which basemap/ }))
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /still true/i }))
+    })
+
+    expect(calls.some((c) => c.startsWith('POST') && c.endsWith('/verified'))).toBe(true)
+  })
 })
 
 describe('Regions', () => {
