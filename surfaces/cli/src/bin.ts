@@ -356,8 +356,29 @@ async function verifyAll(
 async function cmdVerify(args: string[], io: Io): Promise<number> {
   const ack = args.includes('--ack')
   const all = args.includes('--all')
-  const named = args.find((a) => !a.startsWith('-'))
+  const positionals = args.filter((a) => !a.startsWith('-'))
+  const named = positionals[0]
 
+  // Validate before anything opens the database: `--ack` writes to note files,
+  // and a typo or an unsupported combination must refuse rather than guess
+  // which half of it was meant.
+  const unknownFlag = args.find((a) => a.startsWith('-') && a !== '--ack' && a !== '--all')
+  if (unknownFlag) {
+    io.err(`hb verify: unrecognized flag "${unknownFlag}" — expected --ack or --all`)
+    return 1
+  }
+  if (positionals.length > 1) {
+    io.err(`hb verify: takes at most one note id — got ${positionals.join(', ')}`)
+    return 1
+  }
+  if (all && named) {
+    io.err(`hb verify: --all and a note id are mutually exclusive — got "${named}"`)
+    return 1
+  }
+  if (all && !ack) {
+    io.err('hb verify: --all only makes sense with --ack')
+    return 1
+  }
   if (ack && !all && !named) {
     io.err('hb verify: --ack needs a note id, or --all')
     return 1

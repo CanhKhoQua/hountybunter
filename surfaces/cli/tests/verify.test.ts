@@ -91,6 +91,40 @@ describe('hb verify', () => {
   })
 })
 
+describe('hb verify argument validation', () => {
+  it('rejects an unrecognized flag instead of silently behaving like a bare verify', async () => {
+    expect(await runCli(['verify', '--bogus'], io)).toBe(1)
+    expect(err.join('\n')).toContain('--bogus')
+  })
+
+  it('rejects --all together with a note id instead of acking the whole store', async () => {
+    expect(await runCli(['verify', '--ack', '--all', 'typo-id'], io)).toBe(1)
+    expect(err.join('\n')).toContain('typo-id')
+    expect(err.join('\n')).toMatch(/--all/)
+  })
+
+  it('rejects --all without --ack, since it has no meaning on a read-only verify', async () => {
+    expect(await runCli(['verify', '--all'], io)).toBe(1)
+    expect(err.join('\n')).toMatch(/--ack/)
+  })
+
+  it('rejects more than one bare positional instead of dropping the second one', async () => {
+    expect(await runCli(['verify', 'n1', 'n2'], io)).toBe(1)
+    expect(err.join('\n')).toContain('n1')
+    expect(err.join('\n')).toContain('n2')
+  })
+
+  it('still acks the whole store with --ack --all', async () => {
+    expect(await runCli(['verify', '--ack', '--all'], io)).toBe(0)
+    expect(out.join('\n')).toContain('confirmed n1')
+  })
+
+  it('still acks a single named note with --ack <id>', async () => {
+    expect(await runCli(['verify', '--ack', 'n1'], io)).toBe(0)
+    expect(out.join('\n')).toContain('confirmed n1')
+  })
+})
+
 describe('hb ingest', () => {
   it('verifies at the end without writing a baseline', async () => {
     const before = await readFile(notePath(), 'utf8')
