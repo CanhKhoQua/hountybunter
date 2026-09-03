@@ -1,24 +1,30 @@
 import { parseArgs } from 'node:util'
 import {
   EVIDENCE_KINDS,
+  acknowledgeNote,
   appendJot,
   calendarDate,
   indexNote,
   listNotes,
   listSessions,
   markSuperseded,
+  nowIso,
   openDb,
+  projectPathFor,
   projectSlug,
   promoteJot,
+  readAllNotes,
   readJots,
+  recordVerification,
   clearSessionIndex,
   rebuildFromDisk,
   replaySpool,
   resolveTimeZone,
   searchNotes,
   snapshotState,
+  verifyNote,
 } from '@hountybunter/core'
-import type { Evidence, EvidenceKind, RejectedOption } from '@hountybunter/core'
+import type { Evidence, EvidenceKind, Note, RejectedOption } from '@hountybunter/core'
 import { ingestAll, syncArchive } from '@hountybunter/adapter-claude-code'
 import { serve } from '@hountybunter/web'
 
@@ -41,6 +47,7 @@ const USAGE = `usage: hb <command>
   search <query> [--project P] [--limit N]
   list [--project P] [--status S] [--limit N]
   ingest                              read new Claude Code transcript lines
+  verify [--ack (<note-id> | --all)]  check cited evidence against the code; --ack records a baseline
   sessions [--project P] [--limit N]  list ingested sessions, newest first
   rebuild [--verify]                  rebuild the index from disk
   web [--port N]                      serve the local UI on 127.0.0.1`
@@ -65,6 +72,7 @@ export async function runCli(argv: string[], io: Io): Promise<number> {
       case 'search': return await cmdSearch(rest, io)
       case 'list': return await cmdList(rest, io)
       case 'ingest': return await cmdIngest(io)
+      case 'verify': return await cmdVerify(rest, io)
       case 'sessions': return await cmdSessions(rest, io)
       case 'rebuild': return await cmdRebuild(rest, io)
       case 'web': return await cmdWeb(rest, io)
@@ -304,6 +312,95 @@ async function cmdIngest(io: Io): Promise<number> {
     if (report.skippedLines > 0) io.out(`skipped ${report.skippedLines} malformed lines`)
     for (const [kind, count] of Object.entries(report.unknownKinds)) {
       io.out(`unknown record type "${kind}" x${count} (kept with payload)`)
+    }
+
+    // The command people already run. Verification that needs its own command
+    // to be remembered is verification that does not happen.
+    const { notes } = await readAllNotes(io.env)
+    const checked = await verifyAll(notes, db, io)
+    if (checked.stale > 0) io.out(`${checked.stale} notes look stale — run \`hb verify\``)
+    return 0
+  } finally {
+    db.close()
+  }
+}
+
+/**
+ * Check notes and record what was found. Reading only — `hb ingest` calls this
+ * too, and it must never write to a note file.
+ */
+async function verifyAll(
+  notes: Note[],
+  db: ReturnType<typeof openDb>,
+  io: Io,
+): Promise<{ checked: number; stale: number; unbaselined: number }> {
+  const hasSession = db.prepare('SELECT 1 FROM sessions WHERE id = ?')
+  const sessionExists = (id: string) => hasSession.get(id) !== undefined
+  const today = calendarDate(nowIso(), resolveTimeZone(io.env))
+  const at = nowIso()
+
+  let stale = 0
+  let unbaselined = 0
+  for (const note of notes) {
+    const verdict = await verifyNote(note, { projectPath: projectPathFor(db, note), sessionExists, today })
+    recordVerification(db, verdict, at)
+    if (!note.verified) unbaselined += 1
+    if (verdict.stale) {
+      stale += 1
+      io.out(`${note.id} — ${verdict.reasons.join(', ')}`)
+    }
+  }
+  return { checked: notes.length, stale, unbaselined }
+}
+
+async function cmdVerify(args: string[], io: Io): Promise<number> {
+  const ack = args.includes('--ack')
+  const all = args.includes('--all')
+  const named = args.find((a) => !a.startsWith('-'))
+
+  if (ack && !all && !named) {
+    io.err('hb verify: --ack needs a note id, or --all')
+    return 1
+  }
+
+  const { notes, errors } = await readAllNotes(io.env)
+  for (const error of errors) io.err(`hb verify: ${error.message}`)
+
+  const db = openDb(io.env)
+  try {
+    const targets = all || !named ? notes : notes.filter((n) => n.id === named)
+    if (named && targets.length === 0) {
+      io.err(`hb verify: no note ${named}`)
+      return 1
+    }
+
+    if (ack) {
+      const hasSession = db.prepare('SELECT 1 FROM sessions WHERE id = ?')
+      const today = calendarDate(nowIso(), resolveTimeZone(io.env))
+      for (const note of targets) {
+        const acked = await acknowledgeNote(
+          note,
+          {
+            projectPath: projectPathFor(db, note),
+            sessionExists: (id: string) => hasSession.get(id) !== undefined,
+            today,
+          },
+          io.env,
+        )
+        indexNote(db, acked)
+        io.out(`confirmed ${acked.id}`)
+      }
+      return 0
+    }
+
+    const report = await verifyAll(targets, db, io)
+    io.out(`${report.checked} notes checked, ${report.stale} stale`)
+    if (report.unbaselined > 0) {
+      // Not an error and not a stale count: nothing is known about these yet.
+      io.out(
+        `${report.unbaselined} note${report.unbaselined === 1 ? '' : 's'} have no baseline — ` +
+          'run `hb verify --ack --all` to record one',
+      )
     }
     return 0
   } finally {
