@@ -164,6 +164,20 @@ describe('parseNote verified', () => {
     expect(note.verified!.refs).toEqual([{ ref: 'src/a.ts', hash: 'sha256:d' }])
   })
 
+  it('drops a baseline entry with no hash rather than treating an empty one as real', () => {
+    // `str(undefined)` is `''`, not `undefined` — and `''` compares unequal to
+    // any real hash, so a hand-edited entry missing its hash would otherwise
+    // read as `changed`, a false stale from exactly the hand-editing the
+    // no-ref tolerance above already exists for.
+    const note = parseNote(
+      `---\nid: n1\nquestion: q?\nchosen: c\n` +
+        `verified:\n  on: 2026-09-02\n  refs:\n    - {ref: src/a.ts}\n    - {ref: src/b.ts, hash: sha256:d}\n---\n\nb\n`,
+      '/store/n1.md',
+    )
+
+    expect(note.verified!.refs).toEqual([{ ref: 'src/b.ts', hash: 'sha256:d' }])
+  })
+
   it('keeps the block out of extra, now that it is a field of its own', () => {
     const note = parseNote(
       `---\nid: n1\nquestion: q?\nchosen: c\nverified:\n  on: 2026-09-02\n  refs: []\n---\n\nb\n`,

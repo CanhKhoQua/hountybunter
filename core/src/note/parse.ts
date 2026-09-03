@@ -102,7 +102,13 @@ function parseVerified(value: unknown): Verified | null {
         const ref = str(row.ref)
         // A nameless baseline matches no evidence row, so it can only mislead.
         if (!ref) return []
-        return [{ ref, hash: str(row.hash) }]
+        const hash = str(row.hash)
+        // A hand-edited entry with no hash is not the same as one with an
+        // empty-string hash: `''` is not `undefined`, so it would compare
+        // unequal to any real hash and read as `changed` — a false stale from
+        // exactly the hand-editing this tolerance exists for.
+        if (!hash) return []
+        return [{ ref, hash }]
       })
     : []
   return { on: dateStr(record.on), refs }
