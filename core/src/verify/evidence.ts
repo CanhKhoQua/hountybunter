@@ -19,12 +19,16 @@ export interface VerifyContext {
   sessionExists: (id: string) => boolean
 }
 
-/** sha256 of a file's bytes, or undefined when it cannot be read at all. */
-async function hashFile(path: string): Promise<string | undefined> {
+/** sha256 of a file's bytes, or word of whether it is there at all. */
+async function hashFile(path: string): Promise<{ hash: string } | { gone: boolean }> {
   try {
-    return `sha256:${createHash('sha256').update(await readFile(path)).digest('hex')}`
-  } catch {
-    return undefined
+    return { hash: `sha256:${createHash('sha256').update(await readFile(path)).digest('hex')}` }
+  } catch (error) {
+    // Only "it is not there" is news about the note. Permission denied, a ref
+    // that names a directory, a descriptor limit — none of those is evidence
+    // that anything changed, and reporting them as `missing` invents staleness.
+    const code = (error as NodeJS.ErrnoException).code
+    return { gone: code === 'ENOENT' || code === 'ENOTDIR' }
   }
 }
 
@@ -69,16 +73,20 @@ export async function verifyEvidence(
         cwd: context.projectPath,
       })
       return { state: 'verified' }
-    } catch {
-      return { state: 'missing' }
+    } catch (error) {
+      // A signal means something killed git mid-call, not git answering that
+      // the commit is absent. Only a plain exit code is that answer.
+      const signal = (error as { signal?: string | null }).signal
+      return { state: signal ? 'unknown' : 'missing' }
     }
   }
 
   const path = resolveInside(context.projectPath, evidence.ref)
   if (!path) return { state: 'unknown' }
 
-  const hash = await hashFile(path)
-  if (hash === undefined) return { state: 'missing' }
+  const result = await hashFile(path)
+  if ('gone' in result) return result.gone ? { state: 'missing' } : { state: 'unknown' }
+  const { hash } = result
   // Readable, but nobody has said what it should look like. Not news either way.
   if (context.baseline === undefined) return { state: 'unknown', hash }
   return { state: hash === context.baseline ? 'verified' : 'changed', hash }

@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
@@ -61,6 +61,17 @@ describe('file evidence', () => {
       { projectPath: dir, baseline: 'sha256:whatever', sessionExists: never },
     )
     expect(result.state).toBe('missing')
+  })
+
+  it('is unknown, not missing, when the ref names a directory rather than a file', async () => {
+    // A directory is there — it is just not a file. Reporting it as `missing`
+    // would claim the thing cited no longer exists, which is not true.
+    await mkdir(join(dir, 'sub'))
+    const result = await verifyEvidence(
+      { kind: 'file', ref: 'sub' },
+      { projectPath: dir, baseline: 'sha256:whatever', sessionExists: never },
+    )
+    expect(result.state).toBe('unknown')
   })
 
   it('is unknown when the project is not on this machine', async () => {
