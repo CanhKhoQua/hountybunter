@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3'
+import type { Note } from '../types.js'
 
 export interface NoteHit {
   id: string
@@ -221,6 +222,38 @@ export interface RegionRow {
   path: string | null
   name: string | null
   lastSeenAt: string | null
+  /** Notes in this project with a reference that was checked and found wanting. */
+  stale: number
+}
+
+/**
+ * The notes with a reference that was checked and found wanting.
+ *
+ * `unknown` is excluded on purpose: a reference nobody could check is not
+ * evidence of anything. Review dates are not consulted here — they are a
+ * property of the note, resolved against a clock the caller owns.
+ */
+export function staleNoteIds(db: Database.Database): Set<string> {
+  const rows = db
+    .prepare(`SELECT DISTINCT note_id FROM note_evidence WHERE state IN ('changed', 'missing')`)
+    .all() as { note_id: string }[]
+  return new Set(rows.map((r) => r.note_id))
+}
+
+/**
+ * Where a note's project lives.
+ *
+ * The note's own `project_path` is what its author saw when they wrote it, so
+ * it wins; the `projects` row is the fallback for notes written before that
+ * field existed. Null when neither answers — which the caller must read as
+ * "cannot check", never as "nothing changed".
+ */
+export function projectPathFor(db: Database.Database, note: Note): string | null {
+  if (note.project_path) return note.project_path
+  const row = db.prepare('SELECT path FROM projects WHERE slug = ?').get(note.project) as
+    | { path: string }
+    | undefined
+  return row?.path ?? null
 }
 
 /**
@@ -239,7 +272,10 @@ export function listRegions(
               (SELECT COUNT(*) FROM notes n WHERE n.project = p.project) AS notes,
               d.path AS path,
               d.name AS name,
-              d.last_seen_at AS lastSeenAt
+              d.last_seen_at AS lastSeenAt,
+              (SELECT COUNT(DISTINCT e.note_id)
+                 FROM note_evidence e JOIN notes n2 ON n2.id = e.note_id
+                WHERE n2.project = p.project AND e.state IN ('changed', 'missing')) AS stale
        FROM (SELECT project FROM sessions UNION SELECT project FROM notes) p
        LEFT JOIN projects d ON d.slug = p.project
        ORDER BY sessions DESC, p.project ASC

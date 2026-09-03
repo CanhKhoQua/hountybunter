@@ -152,7 +152,7 @@ describe('GET /api/regions', () => {
     // No `projects` row here, so the directory reads as unknown rather than
     // being invented from the slug — which cannot be turned back into a path.
     expect(res.body.regions).toEqual([
-      { project: 'proj-a', sessions: 1, notes: 1, path: null, name: null, lastSeenAt: null },
+      { project: 'proj-a', sessions: 1, notes: 1, path: null, name: null, lastSeenAt: null, stale: 0 },
     ])
   })
 })

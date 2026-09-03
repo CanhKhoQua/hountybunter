@@ -262,10 +262,22 @@ describe('listRegions', () => {
     ).run()
 
     expect(listRegions(db)).toEqual([
-      { project: 'proj-a', sessions: 2, notes: 2, path: null, name: null, lastSeenAt: null },
-      { project: 'proj-b', sessions: 1, notes: 1, path: null, name: null, lastSeenAt: null },
-      { project: 'proj-c', sessions: 0, notes: 1, path: null, name: null, lastSeenAt: null },
+      { project: 'proj-a', sessions: 2, notes: 2, path: null, name: null, lastSeenAt: null, stale: 0 },
+      { project: 'proj-b', sessions: 1, notes: 1, path: null, name: null, lastSeenAt: null, stale: 0 },
+      { project: 'proj-c', sessions: 0, notes: 1, path: null, name: null, lastSeenAt: null, stale: 0 },
     ])
+  })
+
+  it('counts the stale notes in each region, so fog can thicken with the ratio', () => {
+    // n1 belongs to proj-a in this file's fixture. Give it a row to move.
+    db.prepare(
+      `INSERT OR IGNORE INTO note_evidence (note_id, kind, ref) VALUES ('n1', 'file', 'a.ts')`,
+    ).run()
+    db.prepare(`UPDATE note_evidence SET state = 'missing' WHERE note_id = 'n1'`).run()
+
+    const byProject = Object.fromEntries(listRegions(db).map((r) => [r.project, r.stale]))
+    expect(byProject['proj-a']).toBe(1)
+    expect(byProject['proj-b']).toBe(0)
   })
 
   it('includes a project that has notes but no session yet', () => {

@@ -56,7 +56,7 @@ export const SNAPSHOT: Record<string, { columns: string[]; orderBy: string }> = 
     orderBy: 'id',
   },
   note_evidence: {
-    columns: ['note_id', 'kind', 'ref', 'last_verified_at', 'ok'],
+    columns: ['note_id', 'kind', 'ref', 'last_verified_at', 'state'],
     orderBy: 'note_id, kind, ref',
   },
   notes_fts: {
