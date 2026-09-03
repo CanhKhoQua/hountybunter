@@ -139,7 +139,7 @@ function Detail({
                 item.state === 'changed' || item.state === 'missing' ? 'text-warn' : MUTED
               }
             >
-              {EVIDENCE_SAYS[item.state]}
+              {EVIDENCE_SAYS[item.state] ?? item.state}
             </span>
           </li>
         ))}
