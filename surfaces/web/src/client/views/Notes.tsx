@@ -129,7 +129,16 @@ function Detail({
             <span className="truncate">
               {item.kind}:{item.ref}
             </span>
-            <span className={item.state === 'verified' ? MUTED : 'text-warn'}>
+            {/* Colour tracks only whether this reference is a reason the note
+                is stale — `changed` and `missing` are, `unknown` is not (it
+                could not be checked, which is not evidence of anything). The
+                finer distinction between `verified` and `unknown` is left to
+                the words. */}
+            <span
+              className={
+                item.state === 'changed' || item.state === 'missing' ? 'text-warn' : MUTED
+              }
+            >
               {EVIDENCE_SAYS[item.state]}
             </span>
           </li>
