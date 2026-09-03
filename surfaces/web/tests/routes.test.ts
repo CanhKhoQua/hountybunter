@@ -1,8 +1,8 @@
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { indexNote, openDb, parseNote } from '@hountybunter/core'
+import { indexNote, notesDir, openDb, parseNote } from '@hountybunter/core'
 import { handle } from '../src/server/routes.js'
 
 let env: NodeJS.ProcessEnv
@@ -22,13 +22,14 @@ beforeEach(async () => {
     db.prepare(
       `INSERT INTO activities (session_id, seq, kind, tool_name) VALUES ('s1', 1, 'assistant', 'Edit')`,
     ).run()
-    indexNote(
-      db,
-      parseNote(
-        '---\nid: n1\ntitle: Which basemap?\nproject: proj-a\nstatus: standing\nquestion: Which basemap?\nchosen: OpenFreeMap\n---\n\nbody\n',
-        '/store/n1.md',
-      ),
-    )
+    // Written to a real file, not just indexed: the detail and acknowledge
+    // routes read the note back off disk, and a fake path would 404 them.
+    const notePath = join(notesDir('proj-a', env), 'n1.md')
+    const noteRaw =
+      '---\nid: n1\ntitle: Which basemap?\nproject: proj-a\nstatus: standing\nquestion: Which basemap?\nchosen: OpenFreeMap\nevidence:\n  - {kind: file, ref: a.ts}\n---\n\nbody\n'
+    await mkdir(notesDir('proj-a', env), { recursive: true })
+    await writeFile(notePath, noteRaw, 'utf8')
+    indexNote(db, parseNote(noteRaw, notePath))
   } finally {
     db.close()
   }
@@ -312,5 +313,36 @@ describe('GET /api/notes/:id', () => {
   it('404s for a note that is not in the store', async () => {
     const res = await handle('GET', '/api/notes/2026-01-01-nope', null, env)
     expect(res.status).toBe(404)
+  })
+})
+
+describe('staleness over the API', () => {
+  it('marks a note in the list whose evidence was found changed', async () => {
+    const db = openDb(env)
+    try {
+      db.prepare(`UPDATE note_evidence SET state = 'changed'`).run()
+    } finally {
+      db.close()
+    }
+
+    const res = await handle('GET', '/api/notes', null, env)
+    expect(res.body.notes[0].stale).toBe(true)
+  })
+
+  it('gives each reference its own state, not one verdict for all of them', async () => {
+    // One verdict for the whole note would hide which reference moved.
+    const res = await handle('GET', '/api/notes/n1', null, env)
+    expect(res.body.note.evidence[0]).toMatchObject({ ref: 'a.ts', state: 'unknown' })
+  })
+
+  it('acknowledges a note and writes the baseline to its file', async () => {
+    const res = await handle('POST', '/api/notes/n1/verified', {}, env)
+
+    expect(res.status).toBe(200)
+    expect(res.body.note.verified.on).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+  })
+
+  it('404s an acknowledgement for a note that is not in the store', async () => {
+    expect((await handle('POST', '/api/notes/nope/verified', {}, env)).status).toBe(404)
   })
 })

@@ -1,4 +1,6 @@
 import {
+  acknowledgeNote,
+  calendarDate,
   countActivities,
   countNotes,
   countRegions,
@@ -11,10 +13,14 @@ import {
   countSpooled,
   listRegions,
   listSessions,
+  nowIso,
   openDb,
+  projectPathFor,
   receiveHookEvent,
   recordDecision,
+  resolveTimeZone,
   searchNotes,
+  staleNoteIds,
 } from '@hountybunter/core'
 import type { Evidence, RejectedOption } from '@hountybunter/core'
 import { statSync } from 'node:fs'
@@ -131,6 +137,9 @@ export async function handle(
   if (method === 'POST' && path === '/hook') return receiveHook(body, env)
   if (method === 'POST' && path === '/api/notes') return recordNote(body as DecisionBody, env)
 
+  const ack = path.match(/^\/api\/notes\/(.+)\/verified$/)
+  if (method === 'POST' && ack) return acknowledge(decodeURIComponent(ack[1]!), env)
+
   // POST, because it opens a dialog on the desktop: asking twice is not the
   // same as asking once. A cancelled dialog is a 200 with no path, not an
   // error — declining to choose is a normal answer.
@@ -181,13 +190,18 @@ export async function handle(
     if (path === '/api/notes') {
       const query = params.get('q')?.trim()
       const { limit, offset } = page(params, 50)
+      const stale = staleNoteIds(db)
       // A search is ranked by relevance and capped by the limit; paging into
       // rank is not a window a reader can hold, so only the plain list pages.
-      if (query) return { status: 200, body: { notes: searchNotes(db, query, { limit }) } }
-      return {
-        status: 200,
-        body: { notes: listNotes(db, { limit, offset }), total: countNotes(db) },
+      if (query) {
+        const hits = searchNotes(db, query, { limit }).map((n) => ({
+          ...n,
+          stale: stale.has(n.id),
+        }))
+        return { status: 200, body: { notes: hits } }
       }
+      const rows = listNotes(db, { limit, offset }).map((n) => ({ ...n, stale: stale.has(n.id) }))
+      return { status: 200, body: { notes: rows, total: countNotes(db) } }
     }
 
     const noteDetail = path.match(/^\/api\/notes\/(.+)$/)
@@ -195,7 +209,24 @@ export async function handle(
       const id = decodeURIComponent(noteDetail[1]!)
       const note = await getNote(db, id)
       if (!note) return { status: 404, body: { error: `no note ${id}` } }
-      return { status: 200, body: { note } }
+
+      // Each reference carries its own state: one verdict for the whole note
+      // would hide which citation is the one that moved.
+      const states = new Map(
+        (
+          db
+            .prepare('SELECT kind, ref, state FROM note_evidence WHERE note_id = ?')
+            .all(id) as { kind: string; ref: string; state: string }[]
+        ).map((r) => [`${r.kind}:${r.ref}`, r.state]),
+      )
+      const evidence = note.evidence.map((e) => ({
+        ...e,
+        state: states.get(`${e.kind}:${e.ref}`) ?? 'unknown',
+      }))
+      return {
+        status: 200,
+        body: { note: { ...note, evidence, stale: staleNoteIds(db).has(id) } },
+      }
     }
 
     if (path === '/api/regions') {
@@ -269,6 +300,30 @@ async function recordNote(body: DecisionBody, env: NodeJS.ProcessEnv): Promise<R
 
     indexNote(db, note)
     return { status: 201, body: { note } }
+  } finally {
+    db.close()
+  }
+}
+
+/** The web half of `hb verify --ack`: same core call, same file written. */
+async function acknowledge(id: string, env: NodeJS.ProcessEnv): Promise<Response> {
+  const db = openDb(env)
+  try {
+    const note = await getNote(db, id)
+    if (!note) return { status: 404, body: { error: `no note ${id}` } }
+
+    const hasSession = db.prepare('SELECT 1 FROM sessions WHERE id = ?')
+    const acked = await acknowledgeNote(
+      note,
+      {
+        projectPath: projectPathFor(db, note),
+        sessionExists: (sid: string) => hasSession.get(sid) !== undefined,
+        today: calendarDate(nowIso(), resolveTimeZone(env)),
+      },
+      env,
+    )
+    indexNote(db, acked)
+    return { status: 200, body: { note: acked } }
   } finally {
     db.close()
   }
