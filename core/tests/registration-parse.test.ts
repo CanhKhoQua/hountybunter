@@ -54,6 +54,17 @@ describe('parseRegistration', () => {
       .toThrow(RegistrationParseError)
   })
 
+  it('refuses a record with no registered_at, rather than coercing it to an empty string', () => {
+    try {
+      parseRegistration('---\nslug: s\nname: n\npaths:\n  - /a\n---\n', '/p.md')
+      expect.unreachable('should have thrown')
+    } catch (error) {
+      expect(error).toBeInstanceOf(RegistrationParseError)
+      const e = error as RegistrationParseError
+      expect(e.field).toBe('registered_at')
+    }
+  })
+
   it('refuses a relative path, which would resolve differently per caller', () => {
     expect(() => parseRegistration('---\nslug: s\nname: n\npaths:\n  - ./here\nregistered_at: 2026-09-08\n---\n', '/p.md'))
       .toThrow(/absolute/)

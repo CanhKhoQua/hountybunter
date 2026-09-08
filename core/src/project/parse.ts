@@ -50,6 +50,11 @@ export function parseRegistration(raw: string, sourcePath: string): Registration
     }
   }
 
+  const registered_at = dateStr(data.registered_at)
+  if (!registered_at) {
+    throw new RegistrationParseError('registered_at is required', sourcePath, 'registered_at')
+  }
+
   const plan = str(data.plan) || null
   if (plan?.startsWith('/')) {
     throw new RegistrationParseError(
@@ -70,7 +75,7 @@ export function parseRegistration(raw: string, sourcePath: string): Registration
     paths,
     git_remote: str(data.git_remote) || null,
     plan,
-    registered_at: dateStr(data.registered_at),
+    registered_at,
     body: content.trim(),
     extra,
     sourcePath,
