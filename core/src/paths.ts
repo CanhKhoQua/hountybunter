@@ -32,6 +32,11 @@ export function notesDir(slug: string, env: NodeJS.ProcessEnv = process.env): st
   return join(storeRoot(env), 'notes', slug)
 }
 
+/** Authored records of which directories make up a project. */
+export function projectsDir(env: NodeJS.ProcessEnv = process.env): string {
+  return join(storeRoot(env), 'projects')
+}
+
 export function jotsDir(env: NodeJS.ProcessEnv = process.env): string {
   return join(storeRoot(env), 'jots')
 }
