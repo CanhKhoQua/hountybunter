@@ -56,8 +56,8 @@ describe('receiveHookEvent', () => {
 
   it('upgrades a guessed session to exact without disturbing what ingest found', () => {
     db.prepare(
-      `INSERT INTO sessions (id, project, started_at, title, correlation)
-       VALUES ('sess-1', 'myproject-abc123', '2026-09-01T09:59:00.000Z', 'from the transcript', 'guessed')`,
+      `INSERT INTO sessions (id, project, started_at, title, correlation, harness)
+       VALUES ('sess-1', 'myproject-abc123', '2026-09-01T09:59:00.000Z', 'from the transcript', 'guessed', 'claude-code')`,
     ).run()
 
     receiveHookEvent(db, event)

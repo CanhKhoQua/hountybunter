@@ -203,7 +203,7 @@ describe('clearSessionIndex', () => {
   it('drops sessions, activities and their cursors together', async () => {
     const db = openDb(env)
     try {
-      db.prepare("INSERT INTO sessions (id, project) VALUES ('s1', 'p')").run()
+      db.prepare("INSERT INTO sessions (id, project, harness) VALUES ('s1', 'p', 'claude-code')").run()
       db.prepare(
         "INSERT INTO projects (path, slug, name) VALUES ('/w/proj', 'p', 'proj')",
       ).run()

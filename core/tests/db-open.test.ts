@@ -69,4 +69,27 @@ describe('openDb', () => {
 
     expect(() => openDb(env)).toThrow(/schema version 99/)
   })
+
+  it('creates the registration tables', () => {
+    const db = openDb(env)
+    const names = tableNames(db)
+    expect(names).toContain('registered_projects')
+    expect(names).toContain('registered_paths')
+    db.close()
+  })
+
+  it('records which harness produced a session, with no default to fall back on', () => {
+    const db = openDb(env)
+    const columns = db.prepare('PRAGMA table_info(sessions)').all() as {
+      name: string
+      notnull: number
+      dflt_value: string | null
+    }[]
+    const harness = columns.find((c) => c.name === 'harness')
+    expect(harness).toBeDefined()
+    expect(harness!.notnull).toBe(1)
+    // A default would answer for a writer that already knows the answer.
+    expect(harness!.dflt_value).toBeNull()
+    db.close()
+  })
 })

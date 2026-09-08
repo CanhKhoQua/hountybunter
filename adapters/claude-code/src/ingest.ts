@@ -36,8 +36,8 @@ export async function ingestAll(
   const report: IngestReport = { sessions: 0, activities: 0, skippedLines: 0, unknownKinds: {} }
 
   const upsertSession = db.prepare(
-    `INSERT INTO sessions (id, project, started_at, ended_at, branch, model, effort, title, correlation, parent_id)
-     VALUES (@id, @project_for_insert, @started_at, @ended_at, @branch, @model, @effort, @title, 'exact', @parent_id)
+    `INSERT INTO sessions (id, project, started_at, ended_at, branch, model, effort, title, correlation, harness, parent_id)
+     VALUES (@id, @project_for_insert, @started_at, @ended_at, @branch, @model, @effort, @title, 'exact', 'claude-code', @parent_id)
      ON CONFLICT(id) DO UPDATE SET
        parent_id  = COALESCE(excluded.parent_id, sessions.parent_id),
        project    = COALESCE(@project_observed, sessions.project),

@@ -27,9 +27,9 @@ const hook = {
  */
 function ingestFinds(correlation: string) {
   db.prepare(
-    `INSERT INTO sessions (id, project, started_at, title, branch, correlation)
+    `INSERT INTO sessions (id, project, started_at, title, branch, correlation, harness)
      VALUES ('sess-1', 'myproject-guessed', '2026-09-01T09:59:00.000Z',
-             'what the session was about', 'feat/x', @correlation)
+             'what the session was about', 'feat/x', @correlation, 'claude-code')
      ON CONFLICT(id) DO UPDATE SET
        project    = COALESCE(sessions.project, excluded.project),
        started_at = COALESCE(sessions.started_at, excluded.started_at),
@@ -67,7 +67,7 @@ describe('correlation', () => {
   it('never downgrades an exact binding back to a guess', () => {
     receiveHookEvent(db, hook)
     db.prepare(
-      `INSERT INTO sessions (id, project, correlation) VALUES ('sess-1', 'p', 'guessed')
+      `INSERT INTO sessions (id, project, correlation, harness) VALUES ('sess-1', 'p', 'guessed', 'claude-code')
        ON CONFLICT(id) DO UPDATE SET project = excluded.project`,
     ).run()
 

@@ -16,8 +16,8 @@ beforeEach(async () => {
   const db = openDb(env)
   try {
     db.prepare(
-      `INSERT INTO sessions (id, project, started_at, title, branch, correlation)
-       VALUES ('s1', 'proj-a', '2026-08-20T10:00:00.000Z', 'a hunt', 'main', 'guessed')`,
+      `INSERT INTO sessions (id, project, started_at, title, branch, correlation, harness)
+       VALUES ('s1', 'proj-a', '2026-08-20T10:00:00.000Z', 'a hunt', 'main', 'guessed', 'claude-code')`,
     ).run()
     db.prepare(
       `INSERT INTO activities (session_id, seq, kind, tool_name) VALUES ('s1', 1, 'assistant', 'Edit')`,
@@ -42,8 +42,8 @@ describe('paging', () => {
     try {
       for (let i = 2; i <= 12; i += 1) {
         db.prepare(
-          `INSERT INTO sessions (id, project, started_at, correlation)
-           VALUES (?, 'proj-a', ?, 'exact')`,
+          `INSERT INTO sessions (id, project, started_at, correlation, harness)
+           VALUES (?, 'proj-a', ?, 'exact', 'claude-code')`,
         ).run(`s${i}`, `2026-08-${String(i).padStart(2, '0')}T10:00:00.000Z`)
       }
       for (let seq = 2; seq <= 12; seq += 1) {
@@ -270,8 +270,8 @@ describe('POST /api/notes across a date boundary', () => {
     const db = openDb(env)
     try {
       db.prepare(
-        `INSERT INTO sessions (id, project, started_at, correlation)
-         VALUES ('late', 'proj-a', '2026-08-20T18:00:00.000Z', 'exact')`,
+        `INSERT INTO sessions (id, project, started_at, correlation, harness)
+         VALUES ('late', 'proj-a', '2026-08-20T18:00:00.000Z', 'exact', 'claude-code')`,
       ).run()
     } finally {
       db.close()

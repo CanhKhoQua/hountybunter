@@ -59,6 +59,10 @@ CREATE TABLE IF NOT EXISTS sessions (
   effort       TEXT,
   title        TEXT,
   correlation  TEXT NOT NULL DEFAULT 'exact',
+  -- Which agent produced this session. NOT NULL with no default: every writer
+  -- knows which harness it is, so there is no row for which the answer is
+  -- unknown, and a default would be a claim rather than a fallback.
+  harness      TEXT NOT NULL,
   -- Set when this session is a Task-tool run inside another. The transcript
   -- says so itself: a subagent file carries its parent in `sessionId` and its
   -- own id in `agentId`, so nothing here is inferred.
@@ -98,3 +102,22 @@ CREATE TABLE IF NOT EXISTS hook_events (
   UNIQUE (session_id, kind, ts, payload_json)
 );
 CREATE INDEX IF NOT EXISTS hook_events_session_idx ON hook_events(session_id);
+
+-- Authored, unlike `projects`. `rememberProject` keeps every row of that table
+-- at slug = projectSlug(path); a registered worktree carries a declared slug
+-- that does not hash from its own path, so mixing the two would break that
+-- invariant. Separate tables make the authored/derived split structural.
+CREATE TABLE IF NOT EXISTS registered_projects (
+  slug           TEXT PRIMARY KEY,
+  name           TEXT NOT NULL,
+  primary_path   TEXT NOT NULL,
+  plan           TEXT,
+  registered_at  TEXT NOT NULL,
+  source_path    TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS registered_paths (
+  path  TEXT PRIMARY KEY,
+  slug  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS registered_paths_slug_idx ON registered_paths(slug);

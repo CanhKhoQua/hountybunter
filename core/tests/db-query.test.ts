@@ -112,8 +112,8 @@ describe('escapeFts', () => {
 describe('listSessions', () => {
   function session(id: string, project: string, startedAt: string | null, title: string | null) {
     db.prepare(
-      `INSERT INTO sessions (id, project, started_at, title, correlation)
-       VALUES (?, ?, ?, ?, 'exact')`,
+      `INSERT INTO sessions (id, project, started_at, title, correlation, harness)
+       VALUES (?, ?, ?, ?, 'exact', 'claude-code')`,
     ).run(id, project, startedAt, title)
   }
 
@@ -180,8 +180,8 @@ describe('listSessions', () => {
 describe('getSession and listActivities', () => {
   beforeEach(() => {
     db.prepare(
-      `INSERT INTO sessions (id, project, started_at, title, correlation)
-       VALUES ('s1', 'proj-a', '2026-08-20T10:00:00.000Z', 'a hunt', 'guessed')`,
+      `INSERT INTO sessions (id, project, started_at, title, correlation, harness)
+       VALUES ('s1', 'proj-a', '2026-08-20T10:00:00.000Z', 'a hunt', 'guessed', 'claude-code')`,
     ).run()
     for (const seq of [3, 1, 2]) {
       db.prepare(
@@ -229,8 +229,8 @@ describe('getSession and listActivities', () => {
 describe('listRegions with a known directory', () => {
   it('carries the real path, so a region can be worked in and not only read', () => {
     db.prepare(
-      `INSERT INTO sessions (id, project, started_at, correlation)
-       VALUES ('s1', 'proj-a', '2026-08-20T10:00:00.000Z', 'exact')`,
+      `INSERT INTO sessions (id, project, started_at, correlation, harness)
+       VALUES ('s1', 'proj-a', '2026-08-20T10:00:00.000Z', 'exact', 'claude-code')`,
     ).run()
     db.prepare(
       `INSERT INTO projects (path, slug, name, last_seen_at)
@@ -255,10 +255,10 @@ describe('listRegions with a known directory', () => {
 describe('listRegions', () => {
   it('counts sessions and notes per project, busiest first', () => {
     db.prepare(
-      `INSERT INTO sessions (id, project, started_at, correlation)
-       VALUES ('s1', 'proj-a', '2026-08-20T10:00:00.000Z', 'exact'),
-              ('s2', 'proj-a', '2026-08-21T10:00:00.000Z', 'exact'),
-              ('s3', 'proj-b', '2026-08-22T10:00:00.000Z', 'exact')`,
+      `INSERT INTO sessions (id, project, started_at, correlation, harness)
+       VALUES ('s1', 'proj-a', '2026-08-20T10:00:00.000Z', 'exact', 'claude-code'),
+              ('s2', 'proj-a', '2026-08-21T10:00:00.000Z', 'exact', 'claude-code'),
+              ('s3', 'proj-b', '2026-08-22T10:00:00.000Z', 'exact', 'claude-code')`,
     ).run()
 
     expect(listRegions(db, { today: '2026-09-02' })).toEqual([

@@ -54,8 +54,8 @@ export function receiveHookEvent(
     // whether the hook or the transcript happened to arrive first. Timestamps
     // belong to the transcript, which a rebuild reproduces exactly.
     db.prepare(
-      `INSERT INTO sessions (id, project, correlation)
-       VALUES (@id, @project, 'exact')
+      `INSERT INTO sessions (id, project, correlation, harness)
+       VALUES (@id, @project, 'exact', 'claude-code')
        ON CONFLICT(id) DO UPDATE SET
          correlation = 'exact',
          project     = COALESCE(sessions.project, excluded.project)`,

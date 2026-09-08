@@ -202,8 +202,8 @@ describe('hb sessions', () => {
     const db = openDb(io.env)
     try {
       db.prepare(
-        `INSERT INTO sessions (id, project, started_at, title, correlation)
-         VALUES (?, ?, ?, ?, 'exact')`,
+        `INSERT INTO sessions (id, project, started_at, title, correlation, harness)
+         VALUES (?, ?, ?, ?, 'exact', 'claude-code')`,
       ).run(id, project, startedAt, title)
       db.prepare(`INSERT INTO activities (session_id, seq, kind) VALUES (?, 1, 'user')`).run(id)
     } finally {
@@ -240,8 +240,8 @@ describe('hb sessions', () => {
     const db = openDb(io.env)
     try {
       db.prepare(
-        `INSERT INTO sessions (id, project, started_at, title, correlation)
-         VALUES ('sess-3', 'proj-a', '2026-08-22T10:00:00.000Z', NULL, 'exact')`,
+        `INSERT INTO sessions (id, project, started_at, title, correlation, harness)
+         VALUES ('sess-3', 'proj-a', '2026-08-22T10:00:00.000Z', NULL, 'exact', 'claude-code')`,
       ).run()
     } finally {
       db.close()

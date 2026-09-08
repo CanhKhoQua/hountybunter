@@ -130,7 +130,7 @@ body
   it('clearNoteIndex empties note tables only', () => {
     const db = openDb(env)
     indexNote(db, parseNote(RAW, '/store/a.md'))
-    db.prepare("INSERT INTO sessions (id, project) VALUES ('s1','p')").run()
+    db.prepare("INSERT INTO sessions (id, project, harness) VALUES ('s1','p','claude-code')").run()
     clearNoteIndex(db)
     expect(db.prepare('SELECT COUNT(*) c FROM notes').get()).toEqual({ c: 0 })
     expect(db.prepare('SELECT COUNT(*) c FROM notes_fts').get()).toEqual({ c: 0 })

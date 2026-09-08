@@ -70,13 +70,21 @@ export const SNAPSHOT: Record<string, { columns: string[]; orderBy: string }> = 
   sessions: {
     columns: [
       'id', 'project', 'started_at', 'ended_at', 'branch', 'model', 'effort',
-      'title', 'correlation', 'parent_id',
+      'title', 'correlation', 'harness', 'parent_id',
     ],
     orderBy: 'id',
   },
   activities: {
     columns: ['session_id', 'seq', 'ts', 'kind', 'tool_name', 'attr_skill', 'attr_plugin'],
     orderBy: 'session_id, seq',
+  },
+  registered_projects: {
+    columns: ['slug', 'name', 'primary_path', 'plan', 'registered_at', 'source_path'],
+    orderBy: 'slug',
+  },
+  registered_paths: {
+    columns: ['path', 'slug'],
+    orderBy: 'path',
   },
 }
 
