@@ -1,4 +1,4 @@
-import { projectSlug } from '../paths.js'
+import { normalisePath, projectSlug } from '../paths.js'
 import type { Registration } from './parse.js'
 import { readAllRegistrations } from './store.js'
 
@@ -16,10 +16,6 @@ export interface ResolvedProject {
   registration: Registration
 }
 
-function trim(path: string): string {
-  return path.length > 1 && path.endsWith('/') ? path.slice(0, -1) : path
-}
-
 /** True when `cwd` is `root` or sits inside it, matched at a segment boundary. */
 function within(root: string, cwd: string): boolean {
   return cwd === root || cwd.startsWith(`${root}/`)
@@ -29,12 +25,12 @@ export function resolveFrom(
   registrations: Registration[],
   cwd: string,
 ): ResolvedProject | null {
-  const here = trim(cwd)
+  const here = normalisePath(cwd)
   let best: { registration: Registration; path: string } | null = null
 
   for (const registration of registrations) {
     for (const raw of registration.paths) {
-      const path = trim(raw)
+      const path = normalisePath(raw)
       if (!within(path, here)) continue
       // Longest wins, so a project registered inside another resolves to the
       // inner one rather than to whichever was read first.
@@ -44,7 +40,7 @@ export function resolveFrom(
   if (!best) return null
 
   const { registration } = best
-  const primaryPath = trim(registration.paths[0]!)
+  const primaryPath = normalisePath(registration.paths[0]!)
   // Every path's hash-derived slug is read, not just the primary's: notes
   // filed under a path before it was registered — or under a worktree's own
   // slug — stay findable without a file ever moving.
