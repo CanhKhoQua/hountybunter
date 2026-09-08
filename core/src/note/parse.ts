@@ -15,6 +15,7 @@ import {
   type RejectedOption,
   type Verified,
 } from '../types.js'
+import { dateStr, str } from '../frontmatter.js'
 
 export class NoteParseError extends Error {
   constructor(
@@ -32,23 +33,6 @@ const KNOWN_KEYS = new Set([
   'id', 'title', 'project', 'project_path', 'kind', 'status', 'decided_on', 'question',
   'chosen', 'rejected', 'evidence', 'verified', 'confidence', 'review_after', 'supersedes', 'origin',
 ])
-
-function str(value: unknown): string {
-  return typeof value === 'string' ? value : value == null ? '' : String(value)
-}
-
-/**
- * Frontmatter dates need care. YAML 1.1 parses an unquoted `2026-08-12` into a
- * Date anchored at UTC midnight, and String(date) would render it in the
- * machine's local zone — shifting the calendar day west of UTC. Take the UTC
- * date components, which are exactly the day the file's author wrote.
- */
-function dateStr(value: unknown): string {
-  if (value instanceof Date) {
-    return Number.isNaN(value.getTime()) ? '' : value.toISOString().slice(0, 10)
-  }
-  return str(value)
-}
 
 function oneOf<T extends string>(
   value: unknown,
