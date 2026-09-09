@@ -1,4 +1,6 @@
-import { parseArgs } from 'node:util'
+import { execFile } from 'node:child_process'
+import { basename, dirname, resolve } from 'node:path'
+import { parseArgs, promisify } from 'node:util'
 import {
   EVIDENCE_KINDS,
   acknowledgeNote,
@@ -14,15 +16,18 @@ import {
   projectSlug,
   promoteJot,
   readAllNotes,
+  readAllRegistrations,
   readJots,
   recordVerification,
   clearSessionIndex,
   rebuildFromDisk,
   replaySpool,
+  resolveFrom,
   resolveTimeZone,
   searchNotes,
   snapshotState,
   verifyNote,
+  writeRegistration,
 } from '@hountybunter/core'
 import type { Evidence, EvidenceKind, Note, RejectedOption } from '@hountybunter/core'
 import { ingestAll, syncArchive } from '@hountybunter/adapter-claude-code'
@@ -50,6 +55,7 @@ const USAGE = `usage: hb <command>
   verify [--ack (<note-id> | --all)]  check cited evidence against the code; --ack records a baseline
   sessions [--project P] [--limit N]  list ingested sessions, newest first
   rebuild [--verify]                  rebuild the index from disk
+  register [path] [--plan P]          declare a project so hb brief can speak for it
   web [--port N]                      serve the local UI on 127.0.0.1`
 
 /** Parse a numeric CLI option, or explain precisely what was wrong with it. */
@@ -75,6 +81,7 @@ export async function runCli(argv: string[], io: Io): Promise<number> {
       case 'verify': return await cmdVerify(rest, io)
       case 'sessions': return await cmdSessions(rest, io)
       case 'rebuild': return await cmdRebuild(rest, io)
+      case 'register': return await cmdRegister(rest, io)
       case 'web': return await cmdWeb(rest, io)
       default:
         io.err(USAGE)
@@ -513,6 +520,84 @@ async function cmdSessions(args: string[], io: Io): Promise<number> {
   } finally {
     db.close()
   }
+}
+
+/**
+ * The main worktree for `path`, or null when this is not a git worktree.
+ *
+ * A worktree is a different directory for the same project, and
+ * `projectSlug` is path-derived — so without this, every worktree would
+ * register as a project of its own and the notes would scatter.
+ */
+async function mainWorktree(path: string): Promise<string | null> {
+  try {
+    const { stdout } = await promisify(execFile)(
+      'git',
+      ['-C', path, 'rev-parse', '--path-format=absolute', '--git-common-dir'],
+      { timeout: 2000 },
+    )
+    const commonDir = stdout.trim()
+    if (!commonDir) return null
+    // `<main>/.git` for a normal clone and for every worktree of it.
+    return commonDir.endsWith('/.git') ? dirname(commonDir) : null
+  } catch {
+    return null
+  }
+}
+
+async function cmdRegister(args: string[], io: Io): Promise<number> {
+  const { values, positionals } = parseArgs({
+    args,
+    allowPositionals: true,
+    options: { plan: { type: 'string' } },
+  })
+
+  const path = resolve(io.cwd, positionals[0] ?? '.')
+  const plan = values.plan
+  if (plan?.startsWith('/')) {
+    io.err(`hb register: --plan must be repo-relative so it survives the repository moving — got "${plan}"`)
+    return 1
+  }
+
+  const { registrations } = await readAllRegistrations(io.env)
+  const main = await mainWorktree(path)
+
+  // Already registered under this path, or a worktree of something registered.
+  const existing =
+    resolveFrom(registrations, path) ?? (main ? resolveFrom(registrations, main) : null)
+
+  const today = calendarDate(nowIso(), resolveTimeZone(io.env))
+
+  if (existing) {
+    const record = existing.registration
+    const paths = record.paths.includes(path) ? record.paths : [...record.paths, path]
+    const updated = { ...record, paths, plan: plan ?? record.plan }
+    await writeRegistration(updated, io.env)
+    io.out(`registered ${path} under ${updated.slug} (${paths.length} path${paths.length > 1 ? 's' : ''})`)
+  } else {
+    const slug = projectSlug(path)
+    await writeRegistration(
+      {
+        slug,
+        name: basename(path) || slug,
+        paths: [path],
+        git_remote: null,
+        plan: plan ?? null,
+        registered_at: today,
+        body: '',
+        extra: {},
+        sourcePath: '',
+      },
+      io.env,
+    )
+    io.out(`registered ${path} as ${slug}`)
+  }
+
+  io.out('')
+  io.out('Nothing in the repository was changed. Paste this into AGENTS.md and CLAUDE.md:')
+  io.out('')
+  io.out('    Run `hb brief` to see where this work was left.')
+  return 0
 }
 
 /** A port, where 0 legitimately means "pick a free one" — so positiveInt is wrong here. */
