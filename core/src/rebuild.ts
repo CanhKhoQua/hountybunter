@@ -1,11 +1,13 @@
 import type Database from 'better-sqlite3'
-import { clearNoteIndex, indexNote } from './db/write.js'
+import { clearNoteIndex, clearRegistrationIndex, indexNote, indexRegistration } from './db/write.js'
 import { openDb } from './db/open.js'
 import { NoteParseError } from './note/parse.js'
 import { readAllNotes } from './note/store.js'
+import { readAllRegistrations } from './project/store.js'
 
 export interface RebuildReport {
   notesIndexed: number
+  projectsRegistered: number
   errors: NoteParseError[]
 }
 
@@ -18,8 +20,15 @@ export async function rebuildFromDisk(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<RebuildReport> {
   const { notes, errors } = await readAllNotes(env)
+  const { registrations, errors: registrationErrors } = await readAllRegistrations(env)
+  for (const registrationError of registrationErrors) {
+    errors.push(new NoteParseError(registrationError.message, registrationError.sourcePath))
+  }
   const db = openDb(env)
   try {
+    clearRegistrationIndex(db)
+    for (const registration of registrations) indexRegistration(db, registration)
+
     clearNoteIndex(db)
     let indexed = 0
     for (const note of notes) {
@@ -32,7 +41,7 @@ export async function rebuildFromDisk(
         errors.push(new NoteParseError(`could not index: ${String(error)}`, note.sourcePath))
       }
     }
-    return { notesIndexed: indexed, errors }
+    return { notesIndexed: indexed, projectsRegistered: registrations.length, errors }
   } finally {
     db.close()
   }

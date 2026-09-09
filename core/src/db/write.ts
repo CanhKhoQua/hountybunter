@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { basename } from 'node:path'
 import { serializeNote } from '../note/serialize.js'
 import { projectSlug } from '../paths.js'
+import type { Registration } from '../project/parse.js'
 import type { Note } from '../types.js'
 import type { NoteVerdict } from '../verify/note.js'
 
@@ -141,5 +142,36 @@ export function clearNoteIndex(db: Database.Database): void {
     db.prepare('DELETE FROM notes_fts').run()
     db.prepare('DELETE FROM note_evidence').run()
     db.prepare('DELETE FROM notes').run()
+  })()
+}
+
+export function clearRegistrationIndex(db: Database.Database): void {
+  db.exec('DELETE FROM registered_paths; DELETE FROM registered_projects;')
+}
+
+/** Mirror an authored record into the index. The file stays the truth. */
+export function indexRegistration(db: Database.Database, registration: Registration): void {
+  db.transaction(() => {
+    db.prepare(
+      `INSERT INTO registered_projects (slug, name, primary_path, plan, registered_at, source_path)
+       VALUES (@slug, @name, @primary_path, @plan, @registered_at, @source_path)
+       ON CONFLICT(slug) DO UPDATE SET
+         name = excluded.name, primary_path = excluded.primary_path,
+         plan = excluded.plan, registered_at = excluded.registered_at,
+         source_path = excluded.source_path`,
+    ).run({
+      slug: registration.slug,
+      name: registration.name,
+      primary_path: registration.paths[0],
+      plan: registration.plan,
+      registered_at: registration.registered_at,
+      source_path: registration.sourcePath,
+    })
+
+    const insertPath = db.prepare(
+      `INSERT INTO registered_paths (path, slug) VALUES (?, ?)
+       ON CONFLICT(path) DO UPDATE SET slug = excluded.slug`,
+    )
+    for (const path of registration.paths) insertPath.run(path, registration.slug)
   })()
 }
