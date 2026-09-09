@@ -2,7 +2,7 @@ import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { readAllRegistrations } from '@hountybunter/core'
+import { readAllRegistrations, writeRegistration } from '@hountybunter/core'
 import { runCli, type Io } from '../src/bin.js'
 
 let io: Io
@@ -63,5 +63,34 @@ describe('hb register', () => {
     // No git in this fixture, so the second path is only joined when the user
     // names the project it belongs to.
     expect(registrations).toHaveLength(2)
+  })
+})
+
+describe('notes follow the registration', () => {
+  it('files a jot under the registered slug, not the path-derived one', async () => {
+    await runCli(['register'], io)
+    const { registrations } = await readAllRegistrations(io.env)
+    const record = registrations[0]!
+    // `hb register` sets slug = projectSlug(path), so the registered slug and
+    // the path-derived slug are the same string for the primary directory —
+    // declaring a different slug is what actually distinguishes "the CLI reads
+    // the registration" from "the CLI still hashes the path".
+    await writeRegistration({ ...record, slug: 'declared-elsewhere' }, io.env)
+
+    await runCli(['jot', 'chose SQLite because the file outlives the tool'], io)
+    expect(out.join('\n')).toContain('declared-elsewhere')
+  })
+
+  it('files a jot from a second registered path under the primary slug', async () => {
+    await runCli(['register'], io)
+    // Join the worktree to the project by registering it from inside a record
+    // that already holds the main path.
+    const { registrations } = await readAllRegistrations(io.env)
+    const record = registrations[0]!
+    await writeRegistration({ ...record, paths: [...record.paths, '/w/proj-wt'] }, io.env)
+
+    out.length = 0
+    await runCli(['jot', 'from the worktree'], { ...io, cwd: '/w/proj-wt' })
+    expect(out.join('\n')).toContain(record.slug)
   })
 })

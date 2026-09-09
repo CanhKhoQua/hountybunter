@@ -29,6 +29,12 @@ export interface DecisionInput {
   /** Ids of the notes this one replaces. */
   supersedes?: string[]
   body?: string
+  /**
+   * How a path maps to a project slug. Defaults to the path-derived rule; the
+   * CLI passes the registration's, so a note written in a worktree keeps the
+   * directory it was written in.
+   */
+  slugOf?: (path: string) => string
 }
 
 export interface RecordOpts {
@@ -56,7 +62,7 @@ export async function recordDecision(input: DecisionInput, opts: RecordOpts = {}
     title,
     project: input.project,
     project_path:
-      input.projectPath && projectSlug(input.projectPath) === input.project
+      input.projectPath && (input.slugOf ?? projectSlug)(input.projectPath) === input.project
         ? input.projectPath
         : null,
     kind: 'decision',

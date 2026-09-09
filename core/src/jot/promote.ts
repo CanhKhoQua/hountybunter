@@ -18,6 +18,12 @@ export async function promoteJot(
      * than a path that opens somewhere else.
      */
     projectPath?: string
+    /**
+     * How a path maps to a project slug. `promoteJot` spreads its input into
+     * `recordDecision`, so this reaches the guard above unchanged — the CLI
+     * passes the registration's resolver so a worktree's path survives.
+     */
+    slugOf?: (path: string) => string
   },
   opts: JotOpts = {},
 ): Promise<Note> {

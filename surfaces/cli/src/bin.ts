@@ -23,7 +23,9 @@ import {
   rebuildFromDisk,
   replaySpool,
   resolveFrom,
+  resolveProject,
   resolveTimeZone,
+  slugFor,
   searchNotes,
   snapshotState,
   verifyNote,
@@ -110,7 +112,7 @@ async function cmdJot(args: string[], io: Io): Promise<number> {
     return 1
   }
   const jot = await appendJot(
-    { project: projectSlug(io.cwd), text },
+    { project: await slugFor(io.cwd, io.env), text },
     { env: io.env, timeZone: io.env.HOUNTYBUNTER_TZ },
   )
   // The number reported here is what `hb promote` consumes: a position in the
@@ -188,6 +190,12 @@ async function cmdPromote(args: string[], io: Io): Promise<number> {
     return 1
   }
 
+  // Registered or not, the resolver below covers both: a resolved project
+  // reports its own slug regardless of path, and falling back to `projectSlug`
+  // reproduces today's unregistered behaviour exactly.
+  const resolved = await resolveProject(io.cwd, io.env)
+  const slugOf = resolved ? () => resolved.slug : projectSlug
+
   const note = await promoteJot(
     jot,
     {
@@ -202,6 +210,7 @@ async function cmdPromote(args: string[], io: Io): Promise<number> {
       // jot's project, so the store learns the directory of a project it knows
       // only through decisions — and never learns a wrong one.
       projectPath: io.cwd,
+      slugOf,
     },
     { env: io.env, timeZone: io.env.HOUNTYBUNTER_TZ },
   )
