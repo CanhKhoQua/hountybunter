@@ -12,9 +12,10 @@ export interface RebuildReport {
 }
 
 /**
- * Rebuild the note index from the markdown on disk. Clearing first is what
- * makes a deleted file disappear from the index; without it the index would
- * only ever grow.
+ * Rebuild the note and registration indexes from the markdown on disk.
+ * Clearing first is what makes a deleted file — or a path dropped from a
+ * registration — disappear from the index; without it the index would only
+ * ever grow.
  */
 export async function rebuildFromDisk(
   env: NodeJS.ProcessEnv = process.env,

@@ -146,7 +146,10 @@ export function clearNoteIndex(db: Database.Database): void {
 }
 
 export function clearRegistrationIndex(db: Database.Database): void {
-  db.exec('DELETE FROM registered_paths; DELETE FROM registered_projects;')
+  db.transaction(() => {
+    db.prepare('DELETE FROM registered_paths').run()
+    db.prepare('DELETE FROM registered_projects').run()
+  })()
 }
 
 /** Mirror an authored record into the index. The file stays the truth. */
