@@ -27,6 +27,7 @@ describe('hb register', () => {
     const { registrations } = await readAllRegistrations(io.env)
     expect(registrations).toHaveLength(1)
     expect(registrations[0]!.paths).toEqual(['/w/proj'])
+    expect(out.join('\n')).toContain(registrations[0]!.slug)
   })
 
   it('prints the line to paste, and says it changed nothing in the repository', async () => {
@@ -34,6 +35,7 @@ describe('hb register', () => {
     const text = out.join('\n')
     expect(text).toContain('hb brief')
     expect(text).toMatch(/AGENTS\.md|CLAUDE\.md/)
+    expect(text).toMatch(/Nothing in the repository was changed/)
   })
 
   it('registering the same directory twice does not make a second project', async () => {
