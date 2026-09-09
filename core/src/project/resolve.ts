@@ -12,6 +12,13 @@ export interface ResolvedProject {
    */
   slugs: string[]
   primaryPath: string
+  /**
+   * The longest registered path that contains the resolved cwd — not
+   * necessarily `primaryPath`. `plan` is repo-relative precisely so it reads
+   * the same from every worktree (spec §3), so it must be resolved against
+   * the directory the session is actually in, not the project's first path.
+   */
+  matchedPath: string
   plan: string | null
   registration: Registration
 }
@@ -50,6 +57,7 @@ export function resolveFrom(
     slug: registration.slug,
     slugs: [...new Set(slugs)],
     primaryPath,
+    matchedPath: best.path,
     plan: registration.plan,
     registration,
   }

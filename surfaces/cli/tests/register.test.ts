@@ -2,7 +2,7 @@ import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { projectsDir, readAllRegistrations, writeRegistration } from '@hountybunter/core'
+import { openDb, projectsDir, readAllRegistrations, writeRegistration } from '@hountybunter/core'
 import { runCli, type Io } from '../src/bin.js'
 
 let io: Io
@@ -83,6 +83,53 @@ describe('hb register', () => {
     // Byte for byte: the paths, plan, prose and unknown keys in that file are
     // the one thing in this design that nothing can regenerate.
     expect(await readFile(path, 'utf8')).toBe(broken)
+  })
+
+  it('indexes the registration it wrote, so `hb search` can find it without a rebuild', async () => {
+    await runCli(['register'], io)
+    const { registrations } = await readAllRegistrations(io.env)
+
+    const db = openDb(io.env)
+    try {
+      const row = db
+        .prepare('SELECT slug, primary_path, source_path FROM registered_projects WHERE slug = ?')
+        .get(registrations[0]!.slug)
+      expect(row).toEqual({
+        slug: registrations[0]!.slug,
+        primary_path: '/w/proj',
+        // The one field the sourcePath fix actually touches: a fresh
+        // registration's real file on disk, not the empty placeholder it
+        // used to carry into the index.
+        source_path: join(projectsDir(io.env), `${registrations[0]!.slug}.md`),
+      })
+    } finally {
+      db.close()
+    }
+  })
+
+  it('registering a second project does not clear the first', async () => {
+    await runCli(['register'], io)
+    // No git in this fixture, so this is only joined to the first project
+    // when the user names it — registering it bare makes a second one.
+    await runCli(['register', '/w/proj-wt'], { ...io, cwd: '/w/proj-wt' })
+    const { registrations } = await readAllRegistrations(io.env)
+    expect(registrations).toHaveLength(2)
+
+    // What makes this safe is that indexRegistration upserts by slug and
+    // nothing clears the index first — invisible to a suite that only ever
+    // registers one project, so pin it directly: a future accidental
+    // clearRegistrationIndex() call, or a keying mistake, would fail this.
+    const db = openDb(io.env)
+    try {
+      const projectRows = db.prepare('SELECT slug FROM registered_projects').all() as { slug: string }[]
+      expect(projectRows.map((r) => r.slug).sort()).toEqual(registrations.map((r) => r.slug).sort())
+
+      const pathRows = db.prepare('SELECT path FROM registered_paths').all() as { path: string }[]
+      const paths = registrations.flatMap((r) => r.paths)
+      expect(pathRows.map((r) => r.path).sort()).toEqual(paths.sort())
+    } finally {
+      db.close()
+    }
   })
 })
 

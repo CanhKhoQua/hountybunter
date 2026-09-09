@@ -3,6 +3,7 @@ import { composeBrief, type BriefInput } from '../src/brief/compose.js'
 
 const base: BriefInput = {
   name: 'hountybunter',
+  slug: 'hountybunter',
   missingPaths: [],
   git: {
     ok: true,
@@ -93,6 +94,16 @@ describe('composeBrief', () => {
     expect(composeBrief({ ...base, ingestError: 'EACCES' })).toContain('EACCES')
   })
 
+  it('points at `hb list` to read the reasoning behind a settled decision, by the real slug', () => {
+    const text = composeBrief({ ...base, slug: 'my-real-slug' })
+    expect(text).toContain('hb list --project my-real-slug')
+  })
+
+  it('does not point at `hb list` when the project has no notes to read', () => {
+    const text = composeBrief({ ...base, notes: [], notesTotal: 0 })
+    expect(text).not.toContain('hb list')
+  })
+
   it('reports a registered directory that is not on disk, without dropping it', () => {
     // An unmounted drive is not a deregistration, so this is a line in the
     // brief rather than an edit to the record.
@@ -170,6 +181,7 @@ describe('composeBrief', () => {
     // only the notes block's own text is under test.
     const withoutNote: BriefInput = {
       name: 'x',
+      slug: 'x',
       git: {
         ok: true,
         branch: 'b',
@@ -338,6 +350,7 @@ describe('composeBrief', () => {
     const text = composeBrief(
       {
         name: 'x',
+        slug: 'x',
         git: {
           ok: true,
           branch: 'b',
@@ -427,6 +440,7 @@ describe('composeBrief', () => {
     const noteTitles = Array.from({ length: 10 }, (_, i) => `t${i}`)
     const input: BriefInput = {
       name: 'x',
+      slug: 'x',
       git: {
         ok: true,
         branch: 'b',

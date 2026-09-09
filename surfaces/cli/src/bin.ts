@@ -10,6 +10,7 @@ import {
   composeBrief,
   countNotes,
   indexNote,
+  indexRegistration,
   listNotes,
   listSessions,
   markSuperseded,
@@ -601,29 +602,39 @@ async function cmdRegister(args: string[], io: Io): Promise<number> {
 
   const today = calendarDate(nowIso(), resolveTimeZone(io.env))
 
+  let written
   if (existing) {
     const record = existing.registration
     const paths = record.paths.includes(path) ? record.paths : [...record.paths, path]
-    const updated = { ...record, paths, plan: plan ?? record.plan }
-    await writeRegistration(updated, io.env)
-    io.out(`registered ${path} under ${updated.slug} (${paths.length} path${paths.length > 1 ? 's' : ''})`)
+    written = { ...record, paths, plan: plan ?? record.plan }
+    await writeRegistration(written, io.env)
+    io.out(`registered ${path} under ${written.slug} (${paths.length} path${paths.length > 1 ? 's' : ''})`)
   } else {
     const slug = projectSlug(path)
-    await writeRegistration(
-      {
-        slug,
-        name: basename(path) || slug,
-        paths: [path],
-        git_remote: null,
-        plan: plan ?? null,
-        registered_at: today,
-        body: '',
-        extra: {},
-        sourcePath: '',
-      },
-      io.env,
-    )
+    written = {
+      slug,
+      name: basename(path) || slug,
+      paths: [path],
+      git_remote: null,
+      plan: plan ?? null,
+      registered_at: today,
+      body: '',
+      extra: {},
+      sourcePath: target,
+    }
+    await writeRegistration(written, io.env)
     io.out(`registered ${path} as ${slug}`)
+  }
+
+  // Index it now. The store is the source of truth and the index is derived,
+  // so writing one without the other leaves `hb search` unable to find a
+  // project that demonstrably exists — which is exactly what the README's own
+  // sequence did.
+  const db = openDb(io.env)
+  try {
+    indexRegistration(db, written)
+  } finally {
+    db.close()
   }
 
   io.out('')
@@ -736,7 +747,13 @@ async function cmdBrief(args: string[], io: Io): Promise<number> {
     let planStepsTotal = 0
     if (planPath) {
       try {
-        const text = await readFile(join(project.primaryPath, planPath), 'utf8')
+        // Resolved against matchedPath, not primaryPath: the plan is
+        // repo-relative so it reads the same from every worktree, and from a
+        // worktree primaryPath names a *different* one. Do not fall back to
+        // primaryPath when this read fails — that would show another
+        // worktree's steps beside this one's commits, which is the bug this
+        // resolution exists to fix.
+        const text = await readFile(join(project.matchedPath, planPath), 'utf8')
         const steps = text
           .split('\n')
           .filter((l) => /^- \[[ x]\] /.test(l))
@@ -751,6 +768,7 @@ async function cmdBrief(args: string[], io: Io): Promise<number> {
 
     const brief = composeBrief({
       name: project.registration.name,
+      slug: project.slug,
       git: await readGitState(io.cwd),
       missingPaths: await missingOf(project.registration.paths),
       planPath,
