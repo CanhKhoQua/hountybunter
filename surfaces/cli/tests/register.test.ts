@@ -1,8 +1,8 @@
-import { mkdtemp } from 'node:fs/promises'
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { readAllRegistrations, writeRegistration } from '@hountybunter/core'
+import { projectsDir, readAllRegistrations, writeRegistration } from '@hountybunter/core'
 import { runCli, type Io } from '../src/bin.js'
 
 let io: Io
@@ -63,6 +63,26 @@ describe('hb register', () => {
     // No git in this fixture, so the second path is only joined when the user
     // names the project it belongs to.
     expect(registrations).toHaveLength(2)
+  })
+
+  it('refuses to write over a record that does not parse, and says which file to repair', async () => {
+    await runCli(['register'], io)
+    const { registrations } = await readAllRegistrations(io.env)
+    const path = join(projectsDir(io.env), `${registrations[0]!.slug}.md`)
+    // A hand-edit that no longer parses: `registered_at` is required.
+    const broken = (await readFile(path, 'utf8')).replace(/^registered_at:.*\n/m, '')
+    await writeFile(path, broken, 'utf8')
+
+    out.length = 0
+    err.length = 0
+    expect(await runCli(['register'], io)).toBe(1)
+    const said = err.join('\n')
+    expect(said).toContain(path)
+    expect(said).toMatch(/registered_at/)
+    expect(said).toMatch(/repair/i)
+    // Byte for byte: the paths, plan, prose and unknown keys in that file are
+    // the one thing in this design that nothing can regenerate.
+    expect(await readFile(path, 'utf8')).toBe(broken)
   })
 })
 

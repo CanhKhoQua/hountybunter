@@ -1,6 +1,6 @@
-import { mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdtemp, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { parseRegistration } from '../src/project/parse.js'
 import { projectsDir } from '../src/paths.js'
@@ -67,6 +67,25 @@ describe('registration round trip', () => {
   })
 
   it('reports no registrations at all rather than throwing on a store with no directory', async () => {
+    const { registrations, errors } = await readAllRegistrations(env)
+    expect(registrations).toEqual([])
+    expect(errors).toEqual([])
+  })
+
+  it('refuses a slug that would put the record outside the store', async () => {
+    // The slug is authored, and `hb register` writes back whatever slug it
+    // read — so a hand-edited one must not be able to aim the write at the
+    // user's repository, which registration promises never to touch.
+    const escaped = join(dirname(projectsDir(env)), 'escaped.md')
+    await expect(writeRegistration({ ...sample, slug: '../escaped' }, env)).rejects.toThrow(
+      /single path segment/,
+    )
+    await expect(stat(escaped)).rejects.toThrow()
+
+    // Inside the store but not where its reader looks is refused for the same reason.
+    await expect(writeRegistration({ ...sample, slug: 'sub/x' }, env)).rejects.toThrow(
+      /single path segment/,
+    )
     const { registrations, errors } = await readAllRegistrations(env)
     expect(registrations).toEqual([])
     expect(errors).toEqual([])

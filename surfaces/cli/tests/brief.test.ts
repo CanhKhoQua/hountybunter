@@ -2,7 +2,14 @@ import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { parseNote, projectSlug, readAllRegistrations, writeNote, writeRegistration } from '@hountybunter/core'
+import {
+  parseNote,
+  projectSlug,
+  projectsDir,
+  readAllRegistrations,
+  writeNote,
+  writeRegistration,
+} from '@hountybunter/core'
 import { runCli, type Io } from '../src/bin.js'
 
 let io: Io
@@ -47,6 +54,12 @@ describe('hb brief', () => {
     expect(await runCli(['brief', '--wat'], io)).toBe(1)
   })
 
+  /** The record `hb register` wrote for the project this `io` points at. */
+  async function recordPath(): Promise<string> {
+    const { registrations } = await readAllRegistrations(io.env)
+    return join(projectsDir(io.env), `${registrations[0]!.slug}.md`)
+  }
+
   /** A standing note filed under `slug`, on disk for `hb rebuild` to index. */
   async function seedNote(slug: string, id: string, title: string): Promise<void> {
     const note = parseNote(
@@ -56,6 +69,22 @@ describe('hb brief', () => {
     )
     await writeNote(note, io.env)
   }
+
+  it('names a record it could not read instead of calling the project unregistered', async () => {
+    await runCli(['register'], io)
+    const path = await recordPath()
+    // A hand-edit that no longer parses: `registered_at` is required.
+    await writeFile(path, (await readFile(path, 'utf8')).replace(/^registered_at:.*\n/m, ''), 'utf8')
+
+    out.length = 0
+    err.length = 0
+    expect(await runCli(['brief', '--no-ingest'], io)).toBe(1)
+    const said = err.join('\n')
+    expect(said).toContain(path)
+    expect(said).toMatch(/registered_at/)
+    // Sending the user to `hb register` here is what destroys the file.
+    expect(said).not.toMatch(/is not a registered project/)
+  })
 
   it('says how many plan steps the plan holds, not how many it was handed', async () => {
     const project = await mkdtemp(join(tmpdir(), 'hb-brief-plan-'))

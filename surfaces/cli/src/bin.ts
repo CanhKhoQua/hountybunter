@@ -17,6 +17,7 @@ import {
   openDb,
   projectPathFor,
   projectSlug,
+  projectsDir,
   promoteJot,
   readAllNotes,
   readAllRegistrations,
@@ -574,12 +575,29 @@ async function cmdRegister(args: string[], io: Io): Promise<number> {
     return 1
   }
 
-  const { registrations } = await readAllRegistrations(io.env)
+  const { registrations, errors } = await readAllRegistrations(io.env)
+  for (const error of errors) io.err(`hb register: skipped ${error.sourcePath}: ${error.message}`)
+
   const main = await mainWorktree(path)
 
   // Already registered under this path, or a worktree of something registered.
   const existing =
     resolveFrom(registrations, path) ?? (main ? resolveFrom(registrations, main) : null)
+
+  // The record this command would write, and a refusal if it is one of the
+  // records that did not parse — or if the store itself could not be read,
+  // where such a record may be sitting unseen. A registration is authored:
+  // paths, plan, prose and keys we know nothing about. Nothing regenerates it,
+  // and a repair guessed at here would be the same overwrite by another name.
+  const dir = projectsDir(io.env)
+  const target = join(dir, `${existing?.registration.slug ?? projectSlug(path)}.md`)
+  const blocking = errors.find((e) => e.sourcePath === target || e.sourcePath === dir)
+  if (blocking) {
+    io.err(
+      `hb register: refusing to write ${target} — repair ${blocking.sourcePath} by hand first, or registering again would write over what is in it.`,
+    )
+    return 1
+  }
 
   const today = calendarDate(nowIso(), resolveTimeZone(io.env))
 
@@ -634,9 +652,20 @@ async function missingOf(paths: string[]): Promise<string[]> {
 async function cmdBrief(args: string[], io: Io): Promise<number> {
   const { values } = parseArgs({ args, options: { 'no-ingest': { type: 'boolean' } } })
 
-  const project = await resolveProject(io.cwd, io.env)
+  const { registrations, errors } = await readAllRegistrations(io.env)
+  // A malformed record is skipped with a named error (spec §9), and the name
+  // has to reach a human: dropping it silently and calling the project
+  // unregistered sends the user to `hb register`, which would then write over
+  // the file they hand-edited.
+  for (const error of errors) io.err(`hb brief: skipped ${error.sourcePath}: ${error.message}`)
+
+  const project = resolveFrom(registrations, io.cwd)
   if (!project) {
-    io.err(`hb brief: ${io.cwd} is not a registered project. Run \`hb register\` here first.`)
+    io.err(
+      errors.length > 0
+        ? `hb brief: ${io.cwd} matched no registered project, and the unreadable record${errors.length > 1 ? 's' : ''} above may be why. Repair the named file rather than registering again — \`hb register\` would write over it.`
+        : `hb brief: ${io.cwd} is not a registered project. Run \`hb register\` here first.`,
+    )
     return 1
   }
 
