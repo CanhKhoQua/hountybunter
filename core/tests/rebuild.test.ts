@@ -5,6 +5,8 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { clearSessionIndex } from '../src/db/write.js'
 import { openDb } from '../src/db/open.js'
 import { dbPath } from '../src/paths.js'
+import { NoteParseError } from '../src/note/parse.js'
+import { RegistrationParseError } from '../src/project/parse.js'
 import { NOT_SNAPSHOTTED, SNAPSHOT, rebuildFromDisk, snapshotState } from '../src/rebuild.js'
 
 let env: NodeJS.ProcessEnv
@@ -40,6 +42,21 @@ describe('rebuildFromDisk', () => {
     const report = await rebuildFromDisk(env)
     expect(report.notesIndexed).toBe(1)
     expect(report.errors).toHaveLength(1)
+  })
+
+  it('reports a malformed registration as a RegistrationParseError, not a NoteParseError', async () => {
+    await mkdir(join(home, 'notes', 'proj-a'), { recursive: true })
+    await writeFile(join(home, 'notes', 'proj-a', 'bad.md'), '---\nchosen: only\n---\n\nx\n')
+    await mkdir(join(home, 'projects'), { recursive: true })
+    await writeFile(join(home, 'projects', 'bad.md'), '---\nname: no slug here\n---\n\nx\n')
+
+    const report = await rebuildFromDisk(env)
+
+    expect(report.errors).toHaveLength(2)
+    const noteErrors = report.errors.filter((e) => e instanceof NoteParseError)
+    const registrationErrors = report.errors.filter((e) => e instanceof RegistrationParseError)
+    expect(noteErrors).toHaveLength(1)
+    expect(registrationErrors).toHaveLength(1)
   })
 
   // The keystone.
