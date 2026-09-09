@@ -130,4 +130,15 @@ describe('hb brief', () => {
     // And it is ordered by date across both slugs, not by which slug was read first.
     expect(text.indexOf('newest decision')).toBeLessThan(text.indexOf('older decision'))
   })
+
+  it('prints the brief without doubling the newline it already ends with', async () => {
+    await runCli(['register'], io)
+    out.length = 0
+    expect(await runCli(['brief', '--no-ingest'], io)).toBe(0)
+    // `cli.ts` writes each line with a terminator of its own, so handing it a
+    // brief that still carries its own ends the command on a blank line and
+    // puts the printed output one byte over the cap the composer just held.
+    expect(out.at(-1)).not.toMatch(/\n$/)
+    expect(Buffer.byteLength(`${out.join('\n')}\n`, 'utf8')).toBeLessThanOrEqual(2048)
+  })
 })

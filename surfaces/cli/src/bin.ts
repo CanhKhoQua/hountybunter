@@ -749,20 +749,23 @@ async function cmdBrief(args: string[], io: Io): Promise<number> {
       }
     }
 
-    io.out(
-      composeBrief({
-        name: project.registration.name,
-        git: await readGitState(io.cwd),
-        missingPaths: await missingOf(project.registration.paths),
-        planPath,
-        planSteps,
-        planStepsTotal,
-        notes: notes.map((n) => ({ id: n.id, title: n.title, stale: staleIds.has(n.id) })),
-        notesTotal,
-        lastExchange,
-        ingestError,
-      }),
-    )
+    const brief = composeBrief({
+      name: project.registration.name,
+      git: await readGitState(io.cwd),
+      missingPaths: await missingOf(project.registration.paths),
+      planPath,
+      planSteps,
+      planStepsTotal,
+      notes: notes.map((n) => ({ id: n.id, title: n.title, stale: staleIds.has(n.id) })),
+      notesTotal,
+      lastExchange,
+      ingestError,
+    })
+    // The brief already ends in the newline after its closing instruction, and
+    // `io.out` terminates every line it is given — so the last one is handed
+    // over without it. Printing it whole would end the command with a blank
+    // line and spend a byte the composer's cap never budgeted for.
+    io.out(brief.replace(/\n$/, ''))
     return 0
   } finally {
     db.close()
