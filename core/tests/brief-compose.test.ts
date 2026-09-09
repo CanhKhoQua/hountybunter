@@ -84,4 +84,12 @@ describe('composeBrief', () => {
     expect(text).toContain('/w/wt/phase-8b')
     expect(text).toMatch(/not on disk/i)
   })
+
+  it('cuts on a character boundary, so a multi-byte reply never leaves a replacement character', () => {
+    const long = 'ệ'.repeat(9000) // Vietnamese, 3 bytes per character in UTF-8 — many ways to land mid-character
+    const text = composeBrief({ ...base, lastExchange: { ...base.lastExchange!, reply: long } }, 2048)
+    expect(text).not.toContain('�')
+    expect(Buffer.byteLength(text, 'utf8')).toBeLessThanOrEqual(2048)
+    expect(text).toMatch(/cut|truncated/i)
+  })
 })

@@ -28,6 +28,25 @@ export interface BriefInput {
 
 const ABSENT = '_absent_'
 
+/**
+ * The cut is byte-budgeted, but text is not byte-addressable: slicing a UTF-8
+ * buffer at an arbitrary byte offset can land inside a multi-byte character
+ * and hand the reader a replacement glyph in place of the character that was
+ * there. Walk back by whole characters instead, so the kept text is always
+ * valid UTF-8 — this can only make the result shorter than a raw byte slice,
+ * never longer.
+ */
+function truncateUtf8(text: string, maxBytes: number): string {
+  let bytes = 0
+  let end = 0
+  for (const ch of text) {
+    bytes += Buffer.byteLength(ch, 'utf8')
+    if (bytes > maxBytes) break
+    end += ch.length
+  }
+  return text.slice(0, end)
+}
+
 function block(title: string, tier: 'declared' | 'observed', lines: string[]): string {
   const body = lines.length > 0 ? lines.join('\n') : ABSENT
   return `## ${title}  (${tier})\n\n${body}\n`
@@ -102,7 +121,7 @@ export function composeBrief(input: BriefInput, capBytes = 2048): string {
   // tree state is short and is what the reader most needs to be exact.
   const cut = Buffer.byteLength(exchangeBody, 'utf8') > room
   const kept = cut
-    ? `${Buffer.from(exchangeBody, 'utf8').subarray(0, Math.max(room - 24, 0)).toString('utf8')}\n… cut to fit\n`
+    ? `${truncateUtf8(exchangeBody, Math.max(room - 24, 0))}\n… cut to fit\n`
     : exchangeBody
 
   return `${fixed}\n${exchangeHead}${kept}${tail}`
