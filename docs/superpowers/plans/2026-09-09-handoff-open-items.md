@@ -1,5 +1,8 @@
 # What the handoff phase left open — the next slice
 
+All four items are settled as of 2026-09-09; each section says which commit did it and what changed
+about the reasoning. What remains is the smaller list near the end.
+
 Status: written 2026-09-09, after registration and `hb brief` landed at `683175f`. Not a plan; the
 four items below need a decision or a design before they need code, and one of them is not the
 agent's to make.
@@ -8,7 +11,17 @@ The handoff design's own later slices — the `TranscriptSource` seam and the Co
 deliberately not here. They wait on a second implementation actually existing, per §14 of
 `2026-09-08-multi-harness-handoff-design.md`. What follows is what this slice left behind.
 
-## 1. A worktree reads the wrong plan
+## 1. A worktree reads the wrong plan — settled
+
+**Settled 2026-09-09 at `3856353`.** `ResolvedProject` now carries `matchedPath` — the longest
+registered path that matched the cwd, which `resolveFrom` already computed and discarded — and
+`cmdBrief` resolves the plan against it. Deliberately no fallback to `primaryPath` when the plan is
+absent there: falling back would print another branch's steps, which is the defect. `primaryPath`
+stays on the interface with no consumer, as the declared meaning of "the first path is primary".
+
+The original text follows, for the reasoning.
+
+### As originally written
 
 `hb brief` resolves the plan against `project.primaryPath` while it reads git state from `io.cwd`
 (`surfaces/cli/src/bin.ts`). So a session in a worktree checked out on another branch is shown that
@@ -63,7 +76,17 @@ primary tree whose copy of the cited file differs — as it would on another bra
 The fallback trades a false "stale" for a false "evidence changed", which is worse because it looks
 plausible. That is why it is not there.
 
-## 3. `hb register` does not mirror what it wrote
+## 3. `hb register` does not mirror what it wrote — settled
+
+**Settled 2026-09-09 at `6cbe36c`, with its regression guard at `8a28b80`.** `cmdRegister` now
+indexes the record it wrote, in the shape `cmdPromote` set. No clear first: `indexRegistration`
+upserts by slug, and clearing would drop every other project's rows — which is now pinned by a test
+that fails if a `clearRegistrationIndex` call is ever reintroduced. Indexing also meant the written
+record needed its real `sourcePath` rather than `''`, since that field lands in `source_path`.
+
+The original text follows, for the reasoning.
+
+### As originally written
 
 `cmdRegister` writes the record and returns; the `registered_projects` / `registered_paths` rows
 stay stale until the next `hb rebuild`. `cmdPromote` ten lines away does the opposite and says why
@@ -74,7 +97,19 @@ Harmless today, because nothing reads those rows outside tests. It stops being h
 a surface reads registration from the index — which the web UI will, since that is where it reads
 everything else.
 
-## 4. The brief names decisions without saying how to read them
+## 4. The brief names decisions without saying how to read them — settled, differently
+
+**Settled 2026-09-09 at `886c29c`, and this section's own advice was wrong.** It said "printing the
+id costs nothing". Measured: ids run 45-80 characters against titles of 34-65, an id is just the
+slugified title plus the date, and the brief was already at exactly 2048 of its 2048-byte cap with a
+trim in flight — so ids would have cost ~300 bytes of near-duplicate text, taken out of the commit
+list. What shipped instead is one line at the end of the block naming `hb list --project <slug>`,
+printed only when the block actually names something, since a pointer over an absent block is noise
+about nothing.
+
+The original text follows, for the reasoning.
+
+### As originally written
 
 Block 4 prints note titles. `BriefNote` carries an `id` that is collected and never rendered, and
 nothing in the brief or in the line `hb register` prints mentions `hb list` or `hb search`.
