@@ -25,31 +25,43 @@ a one-liner is the question it raises: **is `matchedPath` the right thing for ev
 too?** Notes are filed under the primary slug on purpose, so at least one caller must keep using
 `primaryPath`. Whatever lands should say which of the two each caller wants and why.
 
-## 2. A note recorded in a worktree points at a directory that will not exist
+## 2. A note recorded in a worktree points at a directory that will not exist — settled
 
-**This one needs a human decision, not a review.**
+**Settled 2026-09-09 at `0281621`.** This section originally framed the question as a trade between
+accuracy at the moment of writing and durability, and asked the user to choose. That framing was
+wrong, and the codebase had already answered it.
 
-After registration, a note promoted from a worktree is filed under the project's primary slug —
-correct — but still records the worktree's own directory as `project_path`. `git worktree remove` is
-an ordinary part of a worktree's life, and once it happens every `file:` reference on that note
-resolves to nothing. `verifyNote` reads that as `missing`, and `hb brief` then labels the note
-"stale — its evidence stopped matching", which is false: the evidence did not change, the directory
-holding it went away.
+The symptom was real: a note promoted from a worktree records that worktree as its `project_path`,
+`git worktree remove` is ordinary, and afterwards every `file:` reference under it hit `ENOENT`, was
+read as `missing`, and made `hb brief` label the note "stale — its evidence stopped matching". The
+evidence had not changed. The directory holding it had gone.
 
-Two options, and they trade different things:
+But `core/src/verify/evidence.ts` already draws the distinction that resolves it. Its `hashFile`
+comment says: *"Only 'it is not there' is news about the note. Permission denied, a ref that names a
+directory, a descriptor limit — none of those is evidence that anything changed, and reporting them
+as `missing` invents staleness."* `verifyEvidence` short-circuits to `unknown` when it has no project
+path, and `staleNoteIds` excludes `unknown` on purpose — *"a reference nobody could check is not
+evidence of anything."* Commit `d8293ed` made exactly this call for a single unreadable file.
 
-- **Record `resolved.primaryPath`.** Durable: the path outlives any worktree. But it is not where
-  the note was written, and on a branch where the cited file does not exist it is wrong in a
-  different way.
-- **Keep the worktree path.** Accurate at the moment of writing, and wrong the moment the worktree
-  is removed.
+A vanished project directory is the same class of fact. So `projectPathFor` now returns `null` when
+the path it would otherwise return is not on disk — symmetrically, whether that path came from the
+note or from the `projects` row — and everything downstream already does the right thing.
 
-A third possibility worth weighing: let `projectPathFor` fall back to the `projects` row when
-`project_path` no longer exists on disk. That keeps the accurate value and degrades to the durable
-one, at the cost of a stat on a read path.
+Nothing moved, provenance is kept, and no path was chosen over another.
 
-Half of this predates the phase — a note has always recorded a path that could vanish. What the
-phase added is the *opportunity* to record a durable one and not taking it.
+**Why the `projects` row is deliberately not a fallback.** That row names a different working tree
+than the note's author looked at. Measured with a recorded baseline, a removed worktree, and a
+primary tree whose copy of the cited file differs — as it would on another branch:
+
+| | state | stale |
+|---|---|---|
+| worktree alive, acknowledged | `verified` | no |
+| what ships: directory gone -> unknown | `unknown` | **no** |
+| the old behaviour | `missing` | yes |
+| falling back to the `projects` row | `changed` | yes |
+
+The fallback trades a false "stale" for a false "evidence changed", which is worse because it looks
+plausible. That is why it is not there.
 
 ## 3. `hb register` does not mirror what it wrote
 
