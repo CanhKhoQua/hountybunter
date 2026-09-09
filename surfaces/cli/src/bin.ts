@@ -1,11 +1,13 @@
 import { execFile } from 'node:child_process'
-import { basename, dirname, resolve } from 'node:path'
+import { readFile, stat } from 'node:fs/promises'
+import { basename, dirname, join, resolve } from 'node:path'
 import { parseArgs, promisify } from 'node:util'
 import {
   EVIDENCE_KINDS,
   acknowledgeNote,
   appendJot,
   calendarDate,
+  composeBrief,
   indexNote,
   listNotes,
   listSessions,
@@ -17,6 +19,7 @@ import {
   promoteJot,
   readAllNotes,
   readAllRegistrations,
+  readGitState,
   readJots,
   recordVerification,
   clearSessionIndex,
@@ -32,7 +35,7 @@ import {
   writeRegistration,
 } from '@hountybunter/core'
 import type { Evidence, EvidenceKind, Note, RejectedOption } from '@hountybunter/core'
-import { ingestAll, syncArchive } from '@hountybunter/adapter-claude-code'
+import { findTranscripts, ingestAll, readLastExchange, syncArchive } from '@hountybunter/adapter-claude-code'
 import { serve } from '@hountybunter/web'
 
 export interface Io {
@@ -58,6 +61,7 @@ const USAGE = `usage: hb <command>
   sessions [--project P] [--limit N]  list ingested sessions, newest first
   rebuild [--verify]                  rebuild the index from disk
   register [path] [--plan P]          declare a project so hb brief can speak for it
+  brief [--no-ingest]                 what a fresh agent needs to continue here
   web [--port N]                      serve the local UI on 127.0.0.1`
 
 /** Parse a numeric CLI option, or explain precisely what was wrong with it. */
@@ -84,6 +88,7 @@ export async function runCli(argv: string[], io: Io): Promise<number> {
       case 'sessions': return await cmdSessions(rest, io)
       case 'rebuild': return await cmdRebuild(rest, io)
       case 'register': return await cmdRegister(rest, io)
+      case 'brief': return await cmdBrief(rest, io)
       case 'web': return await cmdWeb(rest, io)
       default:
         io.err(USAGE)
@@ -607,6 +612,114 @@ async function cmdRegister(args: string[], io: Io): Promise<number> {
   io.out('')
   io.out('    Run `hb brief` to see where this work was left.')
   return 0
+}
+
+/**
+ * Registered directories that are not on disk right now. Reported in the brief
+ * and never pruned from the record: an unmounted drive is not a deregistration.
+ */
+async function missingOf(paths: string[]): Promise<string[]> {
+  const missing: string[] = []
+  for (const path of paths) {
+    try {
+      await stat(path)
+    } catch {
+      missing.push(path)
+    }
+  }
+  return missing
+}
+
+async function cmdBrief(args: string[], io: Io): Promise<number> {
+  const { values } = parseArgs({ args, options: { 'no-ingest': { type: 'boolean' } } })
+
+  const project = await resolveProject(io.cwd, io.env)
+  if (!project) {
+    io.err(`hb brief: ${io.cwd} is not a registered project. Run \`hb register\` here first.`)
+    return 1
+  }
+
+  // Ingest first: Codex has no hooks, so its sessions reach the index only
+  // this way, and a brief that skipped it would be wrong in exactly the case
+  // it exists for. A failure costs freshness, never the brief itself.
+  let ingestError: string | null = null
+  if (!values['no-ingest']) {
+    try {
+      await syncArchive(io.env)
+      const db = openDb(io.env)
+      try {
+        await ingestAll(db, io.env)
+      } finally {
+        db.close()
+      }
+    } catch (error) {
+      ingestError = (error as Error).message
+    }
+  }
+
+  const db = openDb(io.env)
+  try {
+    const notes = project.slugs
+      .flatMap((slug) => listNotes(db, { project: slug, status: 'standing', limit: 10 }))
+      .slice(0, 10)
+    // staleNoteIds(db, today) also flags notes whose review_after has passed,
+    // which the brief must not report here: it labels a note "stale — its
+    // evidence stopped matching", a claim that would be false for a note that
+    // is merely due for review. This inline query keeps to evidence only.
+    const staleIds = new Set(
+      (db
+        .prepare(
+          `SELECT DISTINCT note_id FROM note_evidence WHERE state IN ('changed', 'missing')`,
+        )
+        .all() as { note_id: string }[]).map((r) => r.note_id),
+    )
+
+    const session = project.slugs
+      .flatMap((slug) => listSessions(db, { project: slug, limit: 1 }))
+      .sort((a, b) => (b.started_at ?? '').localeCompare(a.started_at ?? ''))[0]
+
+    let lastExchange = null
+    if (session) {
+      const file = (await findTranscripts(io.env)).find((f) => f.sessionId === session.id)
+      const tail = file ? await readLastExchange(file.path) : { prompt: null, reply: null }
+      const harness = (db.prepare('SELECT harness FROM sessions WHERE id = ?').get(session.id) as
+        | { harness: string }
+        | undefined)?.harness
+      lastExchange = { harness: harness ?? 'unknown', when: session.started_at, ...tail }
+    }
+
+    const planPath = project.plan
+    let planSteps: string[] = []
+    if (planPath) {
+      try {
+        const text = await readFile(join(project.primaryPath, planPath), 'utf8')
+        planSteps = text
+          .split('\n')
+          .filter((l) => /^- \[[ x]\] /.test(l))
+          .map((l) => l.replace(/^- \[[ x]\] /, '').replace(/\*\*/g, ''))
+          .slice(0, 12)
+      } catch {
+        // A plan pointing at a file that is not there is reported as the
+        // pointer alone; inventing steps for it would be worse than silence.
+      }
+    }
+
+    io.out(
+      composeBrief({
+        name: project.registration.name,
+        git: await readGitState(io.cwd),
+        missingPaths: await missingOf(project.registration.paths),
+        planPath,
+        planSteps,
+        notes: notes.map((n) => ({ id: n.id, title: n.title, stale: staleIds.has(n.id) })),
+        lastExchange,
+        ingestError,
+      }),
+    )
+    return 0
+  } finally {
+    db.close()
+  }
 }
 
 /** A port, where 0 legitimately means "pick a free one" — so positiveInt is wrong here. */
