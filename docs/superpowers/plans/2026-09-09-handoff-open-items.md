@@ -124,12 +124,19 @@ decisions exist and cannot read one. Printing the id costs nothing; a single lin
 - The committed minimality sweep for `composeBrief` fixes `dirty: []`, so the property is not
   exercised against the last-resort rung. An independent sweep with a non-empty dirty list found no
   violation, so this is coverage rather than a suspected bug.
-- `RebuildReport.errors` wraps registration errors in `NoteParseError`, so the type says the wrong
-  thing about its contents.
-- `hb rebuild` computes `projectsRegistered` and never prints it: a rebuild restores registrations
-  and says nothing about them.
+- ~~`RebuildReport.errors` wraps registration errors in `NoteParseError`~~ — **done `fa943e5`.** The
+  field is a union of the two error classes and the real one survives, rather than a registration's
+  failure being re-wrapped as a note's. A base class was considered and rejected: a union already says
+  what is true, and the two classes are structurally identical anyway.
+- ~~`hb rebuild` computes `projectsRegistered` and never prints it~~ — **done `75c453e`.** It now
+  reads `indexed N notes, M sessions and K projects`, printed even at zero: a count that disappears
+  leaves the reader unable to tell "none" from "not supported".
 - `readLastExchange` reads the whole transcript where spec §6.4 says "reading the tail" — measured
-  at 103 ms and 238 MB peak on a 40 MB file. Time is fine; the memory peak is real.
+  at 103 ms and a 238 MB peak on a 40 MB file. **Declined 2026-09-09, deliberately.** The fix needs a
+  growing byte window and partial-line handling — real complexity in a function that currently reads
+  plainly — and the peak is transient in a command that runs once per session. Reopen it if the brief
+  ever runs somewhere memory-bound, or if transcripts grow past tens of megabytes; not because the
+  design sentence says "tail".
 
 ## One thing to know before touching `composeBrief`
 
