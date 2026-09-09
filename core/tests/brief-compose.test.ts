@@ -92,4 +92,18 @@ describe('composeBrief', () => {
     expect(Buffer.byteLength(text, 'utf8')).toBeLessThanOrEqual(2048)
     expect(text).toMatch(/cut|truncated/i)
   })
+
+  it('respects the cap for every reply length near the boundary, marking a cut whenever one happens', () => {
+    // A single hand-picked length would not have caught this: the separator
+    // `room` forgot to budget for is a one-byte miss, live at exactly one
+    // length in this span. Pin the property across the whole span instead.
+    for (let len = 1250; len <= 1360; len++) {
+      const reply = 'x'.repeat(len)
+      const text = composeBrief({ ...base, lastExchange: { ...base.lastExchange!, reply } }, 2048)
+      expect(Buffer.byteLength(text, 'utf8')).toBeLessThanOrEqual(2048)
+      if (!text.includes(reply)) {
+        expect(text).toMatch(/cut|truncated/i)
+      }
+    }
+  })
 })

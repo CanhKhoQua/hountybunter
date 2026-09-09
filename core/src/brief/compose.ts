@@ -116,7 +116,11 @@ export function composeBrief(input: BriefInput, capBytes = 2048): string {
     ? `you: ${exchange.prompt ?? ABSENT}\n\nagent: ${exchange.reply ?? ABSENT}\n`
     : `${block('Last exchange', 'observed', [])}`
 
-  const room = capBytes - Buffer.byteLength(fixed + exchangeHead + tail, 'utf8')
+  // Budget every byte the return statement emits besides `kept` — including the
+  // '\n' it inserts between `fixed` and `exchangeHead` — so `room` is exactly
+  // what remains, not an underestimate that lets the assembled output slip
+  // past `capBytes` by the width of a separator.
+  const room = capBytes - Buffer.byteLength(fixed + '\n' + exchangeHead + tail, 'utf8')
   // The exchange is the one elastic block, so it is the one that gets cut. The
   // tree state is short and is what the reader most needs to be exact.
   const cut = Buffer.byteLength(exchangeBody, 'utf8') > room
