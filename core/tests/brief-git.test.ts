@@ -61,4 +61,25 @@ describe('readGitState', () => {
     expect(state.branch).toBeNull()
     expect(state.commits).toEqual([])
   })
+
+  it('reads origin/HEAD to determine the default branch, not assuming main', async () => {
+    // Create a non-main default branch to prove the value is read, not defaulted.
+    const sha = (await run('git', ['-C', repo, 'rev-parse', 'HEAD'])).stdout.trim()
+
+    // Set up remote-tracking ref and symbolic ref locally without fetching.
+    await git('update-ref', 'refs/remotes/origin/trunk', sha)
+    await git('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/trunk')
+
+    // Create a local branch at the same commit so the commit range resolves.
+    await git('checkout', '-b', 'trunk')
+    await writeFile(join(repo, 'c.txt'), 'c\n')
+    await git('add', '.')
+    await git('commit', '-m', 'branch commit')
+
+    const state = await readGitState(repo)
+    // The default branch should be 'trunk', not 'origin/trunk' (the stripping) and not 'main' (the fallback).
+    expect(state.defaultBranch).toBe('trunk')
+    // Verify it actually read the symbolic ref and didn't just default to 'main'.
+    expect(state.defaultBranch).not.toBe('main')
+  })
 })

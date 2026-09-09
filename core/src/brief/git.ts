@@ -6,21 +6,11 @@ const run = promisify(execFile)
 export interface GitState {
   ok: boolean
   branch: string | null
-  head: string | null
-  dirty: string[]
+  head: string | null            // "<short sha> <subject>"
+  dirty: string[]                // porcelain lines, capped at 20
   diffstat: string | null
   defaultBranch: string | null
-  commits: string[]
-}
-
-const EMPTY: GitState = {
-  ok: false,
-  branch: null,
-  head: null,
-  dirty: [],
-  diffstat: null,
-  defaultBranch: null,
-  commits: [],
+  commits: string[]              // "<short sha> <subject>" lines, newest first, capped at 20
 }
 
 /** Ask git one question. Null on any failure — a brief must never be the thing that throws. */
@@ -45,7 +35,17 @@ async function defaultBranch(cwd: string): Promise<string | null> {
 
 export async function readGitState(cwd: string): Promise<GitState> {
   const branch = await ask(cwd, ['rev-parse', '--abbrev-ref', 'HEAD'])
-  if (branch === null) return EMPTY
+  if (branch === null) {
+    return {
+      ok: false,
+      branch: null,
+      head: null,
+      dirty: [],
+      diffstat: null,
+      defaultBranch: null,
+      commits: [],
+    }
+  }
 
   const base = await defaultBranch(cwd)
   let commits: string[] = []
