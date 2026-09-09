@@ -106,4 +106,79 @@ describe('composeBrief', () => {
       }
     }
   })
+
+  it('trims the least irreplaceable content first when the fixed blocks alone are already over budget, and says what it dropped', () => {
+    // Roughly what this repository's own `hb brief` produces: 20 commits, 5
+    // dirty paths with a diffstat, 12 plan steps, 5 notes, and an exchange.
+    const commits = Array.from(
+      { length: 20 },
+      (_, i) => `${(1000 + i).toString(16)} fix(core): a realistically long commit subject line number ${i}`,
+    )
+    const dirty = Array.from({ length: 5 }, (_, i) => ` M core/src/some/fairly/nested/file-${i}.ts`)
+    const planSteps = Array.from(
+      { length: 12 },
+      (_, i) => `Step ${i + 1}: a reasonably long and descriptive plan step title`,
+    )
+    const notes = Array.from({ length: 5 }, (_, i) => ({
+      id: `n${i}`,
+      title: `Decision ${i}: a settled call with a fairly long title describing why`,
+      stale: false,
+    }))
+
+    const text = composeBrief({
+      ...base,
+      git: {
+        ...base.git,
+        commits,
+        dirty,
+        diffstat: ' 5 files changed, 120 insertions(+), 40 deletions(-)',
+      },
+      planSteps,
+      notes,
+    })
+
+    expect(Buffer.byteLength(text, 'utf8')).toBeLessThanOrEqual(2048)
+    // Block 1's essentials are never sacrificed.
+    expect(text).toContain('branch: feat/x')
+    expect(text).toContain('head: ac3b33f merge: note staleness')
+    // Something had to give, and the brief says so rather than just omitting it.
+    expect(text).toMatch(/more, cut to fit/)
+  })
+
+  it('says a list was trimmed away rather than reading as though it was never there', () => {
+    // A small, easily-fitting exchange keeps that block out of the way, so
+    // only the notes block's own text is under test.
+    const withoutNote: BriefInput = {
+      name: 'x',
+      git: { ok: true, branch: 'b', head: 'h', dirty: [], diffstat: null, defaultBranch: 'main', commits: [] },
+      missingPaths: [],
+      planPath: null,
+      planSteps: [],
+      notes: [],
+      lastExchange: { harness: 'claude-code', when: null, prompt: 'p', reply: 'r' },
+      ingestError: null,
+    }
+    const withOneNote: BriefInput = {
+      ...withoutNote,
+      notes: [{ id: 'n1', title: 'a note long enough to matter once it is dropped', stale: false }],
+    }
+
+    // Isolate the "Already settled" block: commits and the plan are also
+    // genuinely absent in this fixture, and their own `_absent_` text isn't
+    // what this test is about.
+    function settledBlock(text: string): string {
+      return text.slice(text.indexOf('## Already settled'), text.indexOf('## Last exchange'))
+    }
+
+    // Genuinely nothing there: prints absent.
+    const absentText = composeBrief(withoutNote, 100_000)
+    expect(settledBlock(absentText)).toContain('_absent_')
+
+    // A cap tight enough that the one note cannot survive, but not so tight
+    // that anything else needs sacrificing first — isolates the notes block.
+    const tightCap = Buffer.byteLength(absentText, 'utf8')
+    const trimmedText = composeBrief(withOneNote, tightCap)
+    expect(settledBlock(trimmedText)).not.toContain('_absent_')
+    expect(settledBlock(trimmedText)).toMatch(/more, cut to fit/)
+  })
 })
