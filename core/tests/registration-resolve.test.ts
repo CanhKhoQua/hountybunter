@@ -56,6 +56,18 @@ describe('resolveFrom', () => {
     expect(found?.slug).toBe('hand-written')
   })
 
+  it('reports the matched path, not the primary, for a session inside a second registered path', () => {
+    const found = resolveFrom([reg('proj-a', ['/w/proj', '/w/wt/phase-8b'])], '/w/wt/phase-8b/src')
+    expect(found?.matchedPath).toBe('/w/wt/phase-8b')
+    expect(found?.primaryPath).toBe('/w/proj')
+  })
+
+  it('reports the primary path as the match when the session is inside the first registered path', () => {
+    const found = resolveFrom([reg('proj-a', ['/w/proj', '/w/wt/phase-8b'])], '/w/proj/src')
+    expect(found?.matchedPath).toBe('/w/proj')
+    expect(found?.primaryPath).toBe('/w/proj')
+  })
+
   it('carries the declared plan through', () => {
     expect(resolveFrom([reg('proj-a', ['/w/proj'], 'docs/p.md')], '/w/proj')?.plan).toBe('docs/p.md')
   })

@@ -131,6 +131,27 @@ describe('hb brief', () => {
     expect(text.indexOf('newest decision')).toBeLessThan(text.indexOf('older decision'))
   })
 
+  it("reads the plan relative to the worktree it is run from, not the project's primary path", async () => {
+    const main = await mkdtemp(join(tmpdir(), 'hb-brief-main-'))
+    const worktree = await mkdtemp(join(tmpdir(), 'hb-brief-wt-'))
+    const where = { ...io, cwd: main }
+    await runCli(['register', '--plan', 'plan.md'], where)
+
+    // Join the worktree to the project, as registering from inside it would.
+    const { registrations } = await readAllRegistrations(io.env)
+    await writeRegistration({ ...registrations[0]!, paths: [main, worktree] }, io.env)
+
+    // The plan exists only where the worktree can see it — this is what makes
+    // the test fail if the code reads `primaryPath` (main) instead of the
+    // matched path (worktree): there, the plan is simply absent.
+    await writeFile(join(worktree, 'plan.md'), '- [ ] only the worktree has this step\n', 'utf8')
+
+    out.length = 0
+    expect(await runCli(['brief', '--no-ingest'], { ...io, cwd: worktree })).toBe(0)
+    const text = out.join('\n')
+    expect(text).toContain('only the worktree has this step')
+  })
+
   it('prints the brief without doubling the newline it already ends with', async () => {
     await runCli(['register'], io)
     out.length = 0

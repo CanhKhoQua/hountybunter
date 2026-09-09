@@ -736,7 +736,13 @@ async function cmdBrief(args: string[], io: Io): Promise<number> {
     let planStepsTotal = 0
     if (planPath) {
       try {
-        const text = await readFile(join(project.primaryPath, planPath), 'utf8')
+        // Resolved against matchedPath, not primaryPath: the plan is
+        // repo-relative so it reads the same from every worktree, and from a
+        // worktree primaryPath names a *different* one. Do not fall back to
+        // primaryPath when this read fails — that would show another
+        // worktree's steps beside this one's commits, which is the bug this
+        // resolution exists to fix.
+        const text = await readFile(join(project.matchedPath, planPath), 'utf8')
         const steps = text
           .split('\n')
           .filter((l) => /^- \[[ x]\] /.test(l))
