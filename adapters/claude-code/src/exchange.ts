@@ -34,16 +34,21 @@ export async function readLastExchange(path: string): Promise<Exchange> {
   let reply: string | null = null
   for (const line of raw.split('\n')) {
     if (!line.trim()) continue
-    let record: { type?: string; message?: { content?: unknown } }
+    let record: unknown
     try {
       record = JSON.parse(line)
     } catch {
       continue
     }
-    const text = textOf(record.message?.content)
+    // Valid JSON, but not a record — `null`, a bare number, a bare string.
+    // Undocumented format, so this is skipped exactly like a parse failure
+    // rather than trusted to have the shape below.
+    if (typeof record !== 'object' || record === null) continue
+    const { type, message } = record as { type?: string; message?: { content?: unknown } }
+    const text = textOf(message?.content)
     if (!text) continue
-    if (record.type === 'user') prompt = text
-    if (record.type === 'assistant') reply = text
+    if (type === 'user') prompt = text
+    if (type === 'assistant') reply = text
   }
   return { prompt, reply }
 }

@@ -32,4 +32,12 @@ describe('readLastExchange', () => {
 
     expect(await readLastExchange(path)).toEqual({ prompt: 'kept', reply: 'kept too' })
   })
+
+  it('skips a line that is valid JSON but not an object, instead of throwing', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'hb-tail3-'))
+    const path = join(dir, 's.jsonl')
+    await writeFile(path, [user('kept'), 'null', assistant('kept too')].join('\n'))
+
+    expect(await readLastExchange(path)).toEqual({ prompt: 'kept', reply: 'kept too' })
+  })
 })
