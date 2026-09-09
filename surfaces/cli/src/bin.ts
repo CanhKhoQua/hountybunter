@@ -1,23 +1,43 @@
-import { parseArgs } from 'node:util'
+import { execFile } from 'node:child_process'
+import { readFile, stat } from 'node:fs/promises'
+import { basename, dirname, join, resolve } from 'node:path'
+import { parseArgs, promisify } from 'node:util'
 import {
   EVIDENCE_KINDS,
+  acknowledgeNote,
   appendJot,
   calendarDate,
+  composeBrief,
+  countNotes,
   indexNote,
   listNotes,
   listSessions,
+  markSuperseded,
+  nowIso,
   openDb,
+  projectPathFor,
   projectSlug,
+  projectsDir,
   promoteJot,
+  readAllNotes,
+  readAllRegistrations,
+  readGitState,
   readJots,
+  recordVerification,
+  clearSessionIndex,
   rebuildFromDisk,
   replaySpool,
+  resolveFrom,
+  resolveProject,
   resolveTimeZone,
+  slugFor,
   searchNotes,
   snapshotState,
+  verifyNote,
+  writeRegistration,
 } from '@hountybunter/core'
-import type { Evidence, EvidenceKind, RejectedOption } from '@hountybunter/core'
-import { ingestAll } from '@hountybunter/adapter-claude-code'
+import type { Evidence, EvidenceKind, Note, RejectedOption } from '@hountybunter/core'
+import { findTranscripts, ingestAll, readLastExchange, syncArchive } from '@hountybunter/adapter-claude-code'
 import { serve } from '@hountybunter/web'
 
 export interface Io {
@@ -34,11 +54,16 @@ const USAGE = `usage: hb <command>
   promote <n> --question Q --chosen C [--title T]   n = position in the full list, oldest first
               [--rejected 'option :: why not']      repeatable
               [--evidence kind:ref]                 kind = file | commit | session | url, repeatable
+              [--drafted]                           an agent worded it; you approved it
+              [--supersedes note-id]                retires that note, repeatable
   search <query> [--project P] [--limit N]
   list [--project P] [--status S] [--limit N]
   ingest                              read new Claude Code transcript lines
+  verify [--ack (<note-id> | --all)]  check cited evidence against the code; --ack records a baseline
   sessions [--project P] [--limit N]  list ingested sessions, newest first
   rebuild [--verify]                  rebuild the index from disk
+  register [path] [--plan P]          declare a project so hb brief can speak for it
+  brief [--no-ingest]                 what a fresh agent needs to continue here
   web [--port N]                      serve the local UI on 127.0.0.1`
 
 /** Parse a numeric CLI option, or explain precisely what was wrong with it. */
@@ -61,8 +86,11 @@ export async function runCli(argv: string[], io: Io): Promise<number> {
       case 'search': return await cmdSearch(rest, io)
       case 'list': return await cmdList(rest, io)
       case 'ingest': return await cmdIngest(io)
+      case 'verify': return await cmdVerify(rest, io)
       case 'sessions': return await cmdSessions(rest, io)
       case 'rebuild': return await cmdRebuild(rest, io)
+      case 'register': return await cmdRegister(rest, io)
+      case 'brief': return await cmdBrief(rest, io)
       case 'web': return await cmdWeb(rest, io)
       default:
         io.err(USAGE)
@@ -77,13 +105,21 @@ export async function runCli(argv: string[], io: Io): Promise<number> {
 }
 
 async function cmdJot(args: string[], io: Io): Promise<number> {
-  const text = args.join(' ').trim()
+  // `hb jot` takes no flags, so anything that looks like one is a mistake — and
+  // filing it as the note's text corrupts the store without a word. `--` is the
+  // usual escape for text that genuinely starts with a dash.
+  const words = args[0] === '--' ? args.slice(1) : args
+  if (args[0] !== '--' && args[0]?.startsWith('-')) {
+    io.err(`hb jot: takes text, not flags — got "${args[0]}". Use \`hb jot -- ${args[0]}\` to jot it literally.`)
+    return 1
+  }
+  const text = words.join(' ').trim()
   if (!text) {
     io.err('hb jot: needs some text')
     return 1
   }
   const jot = await appendJot(
-    { project: projectSlug(io.cwd), text },
+    { project: await slugFor(io.cwd, io.env), text },
     { env: io.env, timeZone: io.env.HOUNTYBUNTER_TZ },
   )
   // The number reported here is what `hb promote` consumes: a position in the
@@ -135,6 +171,8 @@ async function cmdPromote(args: string[], io: Io): Promise<number> {
       title: { type: 'string' },
       rejected: { type: 'string', multiple: true },
       evidence: { type: 'string', multiple: true },
+      drafted: { type: 'boolean' },
+      supersedes: { type: 'string', multiple: true },
     },
   })
 
@@ -159,6 +197,12 @@ async function cmdPromote(args: string[], io: Io): Promise<number> {
     return 1
   }
 
+  // Registered or not, the resolver below covers both: a resolved project
+  // reports its own slug regardless of path, and falling back to `projectSlug`
+  // reproduces today's unregistered behaviour exactly.
+  const resolved = await resolveProject(io.cwd, io.env)
+  const slugOf = resolved ? () => resolved.slug : projectSlug
+
   const note = await promoteJot(
     jot,
     {
@@ -167,6 +211,13 @@ async function cmdPromote(args: string[], io: Io): Promise<number> {
       title: values.title,
       rejected: parseRejected(values.rejected),
       evidence: parseEvidence(values.evidence),
+      origin: values.drafted ? 'drafted' : 'authored',
+      supersedes: values.supersedes ?? [],
+      // Where the note is being written from. Kept only if it hashes to the
+      // jot's project, so the store learns the directory of a project it knows
+      // only through decisions — and never learns a wrong one.
+      projectPath: io.cwd,
+      slugOf,
     },
     { env: io.env, timeZone: io.env.HOUNTYBUNTER_TZ },
   )
@@ -177,6 +228,9 @@ async function cmdPromote(args: string[], io: Io): Promise<number> {
   const db = openDb(io.env)
   try {
     indexNote(db, note)
+    // The replaced notes are marked after the new one is written: a decision
+    // must never be retired before the thing that replaces it exists.
+    for (const id of values.supersedes ?? []) await markSuperseded(db, id, io.env)
   } finally {
     db.close()
   }
@@ -266,6 +320,12 @@ async function cmdList(args: string[], io: Io): Promise<number> {
 async function cmdIngest(io: Io): Promise<number> {
   const db = openDb(io.env)
   try {
+    // Copy before reading. The agent deletes its transcripts on a 30-day clock,
+    // so a run that only indexed them would be the last chance to see them.
+    const archived = await syncArchive(io.env, db)
+    if (archived.bytesCopied > 0) {
+      io.out(`archived ${archived.bytesCopied} bytes from ${archived.files} transcripts`)
+    }
     const report = await ingestAll(db, io.env)
     const spooled = await replaySpool(db, io.env)
     if (spooled.replayed > 0 || spooled.skipped > 0) {
@@ -276,24 +336,168 @@ async function cmdIngest(io: Io): Promise<number> {
     for (const [kind, count] of Object.entries(report.unknownKinds)) {
       io.out(`unknown record type "${kind}" x${count} (kept with payload)`)
     }
+
+    // The command people already run. Verification that needs its own command
+    // to be remembered is verification that does not happen.
+    const { notes } = await readAllNotes(io.env)
+    const checked = await verifyAll(notes, db, io)
+    if (checked.stale > 0) io.out(`${checked.stale} notes look stale — run \`hb verify\``)
     return 0
   } finally {
     db.close()
   }
 }
 
+/**
+ * Check notes and record what was found. Reading only — `hb ingest` calls this
+ * too, and it must never write to a note file.
+ */
+async function verifyAll(
+  notes: Note[],
+  db: ReturnType<typeof openDb>,
+  io: Io,
+): Promise<{ checked: number; stale: number; unbaselined: number }> {
+  const hasSession = db.prepare('SELECT 1 FROM sessions WHERE id = ?')
+  const sessionExists = (id: string) => hasSession.get(id) !== undefined
+  const today = calendarDate(nowIso(), resolveTimeZone(io.env))
+  const at = nowIso()
+
+  let stale = 0
+  let unbaselined = 0
+  for (const note of notes) {
+    const verdict = await verifyNote(note, { projectPath: projectPathFor(db, note), sessionExists, today })
+    recordVerification(db, verdict, at)
+    if (!note.verified) unbaselined += 1
+    if (verdict.stale) {
+      stale += 1
+      io.out(`${note.id} — ${verdict.reasons.join(', ')}`)
+    }
+  }
+  return { checked: notes.length, stale, unbaselined }
+}
+
+async function cmdVerify(args: string[], io: Io): Promise<number> {
+  const ack = args.includes('--ack')
+  const all = args.includes('--all')
+  const positionals = args.filter((a) => !a.startsWith('-'))
+  const named = positionals[0]
+
+  // Validate before anything opens the database: `--ack` writes to note files,
+  // and a typo or an unsupported combination must refuse rather than guess
+  // which half of it was meant.
+  const unknownFlag = args.find((a) => a.startsWith('-') && a !== '--ack' && a !== '--all')
+  if (unknownFlag) {
+    io.err(`hb verify: unrecognized flag "${unknownFlag}" — expected --ack or --all`)
+    return 1
+  }
+  if (positionals.length > 1) {
+    io.err(`hb verify: takes at most one note id — got ${positionals.join(', ')}`)
+    return 1
+  }
+  if (all && named) {
+    io.err(`hb verify: --all and a note id are mutually exclusive — got "${named}"`)
+    return 1
+  }
+  if (all && !ack) {
+    io.err('hb verify: --all only makes sense with --ack')
+    return 1
+  }
+  if (ack && !all && !named) {
+    io.err('hb verify: --ack needs a note id, or --all')
+    return 1
+  }
+
+  const { notes, errors } = await readAllNotes(io.env)
+  for (const error of errors) io.err(`hb verify: ${error.message}`)
+
+  const db = openDb(io.env)
+  try {
+    const targets = all || !named ? notes : notes.filter((n) => n.id === named)
+    if (named && targets.length === 0) {
+      io.err(`hb verify: no note ${named}`)
+      return 1
+    }
+
+    if (ack) {
+      const hasSession = db.prepare('SELECT 1 FROM sessions WHERE id = ?')
+      const sessionExists = (id: string) => hasSession.get(id) !== undefined
+      const today = calendarDate(nowIso(), resolveTimeZone(io.env))
+      for (const note of targets) {
+        const acked = await acknowledgeNote(
+          note,
+          { projectPath: projectPathFor(db, note), sessionExists, today },
+          io.env,
+        )
+        indexNote(db, acked)
+        // indexNote resets every evidence row to `unknown`, which would
+        // contradict what acknowledgeNote just measured — the same
+        // re-verify-and-record the web surface's ack route does.
+        const verdict = await verifyNote(acked, {
+          projectPath: projectPathFor(db, acked),
+          sessionExists,
+          today,
+        })
+        recordVerification(db, verdict, nowIso())
+        io.out(`confirmed ${acked.id}`)
+      }
+      return 0
+    }
+
+    const report = await verifyAll(targets, db, io)
+    io.out(`${report.checked} notes checked, ${report.stale} stale`)
+    if (report.unbaselined > 0) {
+      // Not an error and not a stale count: nothing is known about these yet.
+      io.out(
+        `${report.unbaselined} note${report.unbaselined === 1 ? '' : 's'} have no baseline — ` +
+          'run `hb verify --ack --all` to record one',
+      )
+    }
+    return 0
+  } finally {
+    db.close()
+  }
+}
+
+/**
+ * Rebuild the whole index from what the store already holds: notes from their
+ * markdown, sessions from the transcript archive. Pulling anything new in is
+ * `hb ingest`'s job, not this one's.
+ *
+ * Both halves, because the schema-version error tells the user to delete the
+ * index and rebuild — and an instruction that restores half the index is worse
+ * than none, since `hb list` then reports nothing while the files are right
+ * there.
+ */
+async function rebuildEverything(io: Io): Promise<{ notes: number; sessions: number; errors: string[] }> {
+  const db = openDb(io.env)
+  let sessions: number
+  try {
+    clearSessionIndex(db)
+    sessions = (await ingestAll(db, io.env)).sessions
+  } finally {
+    db.close()
+  }
+  const notes = await rebuildFromDisk(io.env)
+  return {
+    notes: notes.notesIndexed,
+    sessions,
+    errors: notes.errors.map((e) => `${e.sourcePath}: ${e.message}`),
+  }
+}
+
 async function cmdRebuild(args: string[], io: Io): Promise<number> {
   const { values } = parseArgs({ args, options: { verify: { type: 'boolean' } } })
 
-  const report = await rebuildFromDisk(io.env)
-  io.out(`indexed ${report.notesIndexed} note${report.notesIndexed === 1 ? '' : 's'}`)
-  for (const error of report.errors) {
-    io.err(`${error.sourcePath}: ${error.message}`)
-  }
+  const report = await rebuildEverything(io)
+  io.out(
+    `indexed ${report.notes} note${report.notes === 1 ? '' : 's'} and ` +
+      `${report.sessions} session${report.sessions === 1 ? '' : 's'}`,
+  )
+  for (const error of report.errors) io.err(error)
 
   if (values.verify) {
     const first = snapshotState(openDb(io.env))
-    await rebuildFromDisk(io.env)
+    await rebuildEverything(io)
     const second = snapshotState(openDb(io.env))
     if (first !== second) {
       io.err('rebuild is not deterministic — state differed between runs')
@@ -328,6 +532,240 @@ async function cmdSessions(args: string[], io: Io): Promise<number> {
       const date = hit.started_at ? calendarDate(hit.started_at, timeZone) : 'undated'
       io.out(`${date}  ${hit.id}  ${hit.activities} acts  ${hit.title ?? '(untitled)'}`)
     }
+    return 0
+  } finally {
+    db.close()
+  }
+}
+
+/**
+ * The main worktree for `path`, or null when this is not a git worktree.
+ *
+ * A worktree is a different directory for the same project, and
+ * `projectSlug` is path-derived — so without this, every worktree would
+ * register as a project of its own and the notes would scatter.
+ */
+async function mainWorktree(path: string): Promise<string | null> {
+  try {
+    const { stdout } = await promisify(execFile)(
+      'git',
+      ['-C', path, 'rev-parse', '--path-format=absolute', '--git-common-dir'],
+      { timeout: 2000 },
+    )
+    const commonDir = stdout.trim()
+    if (!commonDir) return null
+    // `<main>/.git` for a normal clone and for every worktree of it.
+    return commonDir.endsWith('/.git') ? dirname(commonDir) : null
+  } catch {
+    return null
+  }
+}
+
+async function cmdRegister(args: string[], io: Io): Promise<number> {
+  const { values, positionals } = parseArgs({
+    args,
+    allowPositionals: true,
+    options: { plan: { type: 'string' } },
+  })
+
+  const path = resolve(io.cwd, positionals[0] ?? '.')
+  const plan = values.plan
+  if (plan?.startsWith('/')) {
+    io.err(`hb register: --plan must be repo-relative so it survives the repository moving — got "${plan}"`)
+    return 1
+  }
+
+  const { registrations, errors } = await readAllRegistrations(io.env)
+  for (const error of errors) io.err(`hb register: skipped ${error.sourcePath}: ${error.message}`)
+
+  const main = await mainWorktree(path)
+
+  // Already registered under this path, or a worktree of something registered.
+  const existing =
+    resolveFrom(registrations, path) ?? (main ? resolveFrom(registrations, main) : null)
+
+  // The record this command would write, and a refusal if it is one of the
+  // records that did not parse — or if the store itself could not be read,
+  // where such a record may be sitting unseen. A registration is authored:
+  // paths, plan, prose and keys we know nothing about. Nothing regenerates it,
+  // and a repair guessed at here would be the same overwrite by another name.
+  const dir = projectsDir(io.env)
+  const target = join(dir, `${existing?.registration.slug ?? projectSlug(path)}.md`)
+  const blocking = errors.find((e) => e.sourcePath === target || e.sourcePath === dir)
+  if (blocking) {
+    io.err(
+      `hb register: refusing to write ${target} — repair ${blocking.sourcePath} by hand first, or registering again would write over what is in it.`,
+    )
+    return 1
+  }
+
+  const today = calendarDate(nowIso(), resolveTimeZone(io.env))
+
+  if (existing) {
+    const record = existing.registration
+    const paths = record.paths.includes(path) ? record.paths : [...record.paths, path]
+    const updated = { ...record, paths, plan: plan ?? record.plan }
+    await writeRegistration(updated, io.env)
+    io.out(`registered ${path} under ${updated.slug} (${paths.length} path${paths.length > 1 ? 's' : ''})`)
+  } else {
+    const slug = projectSlug(path)
+    await writeRegistration(
+      {
+        slug,
+        name: basename(path) || slug,
+        paths: [path],
+        git_remote: null,
+        plan: plan ?? null,
+        registered_at: today,
+        body: '',
+        extra: {},
+        sourcePath: '',
+      },
+      io.env,
+    )
+    io.out(`registered ${path} as ${slug}`)
+  }
+
+  io.out('')
+  io.out('Nothing in the repository was changed. Paste this into AGENTS.md and CLAUDE.md:')
+  io.out('')
+  io.out('    Run `hb brief` to see where this work was left.')
+  return 0
+}
+
+/**
+ * Registered directories that are not on disk right now. Reported in the brief
+ * and never pruned from the record: an unmounted drive is not a deregistration.
+ */
+async function missingOf(paths: string[]): Promise<string[]> {
+  const missing: string[] = []
+  for (const path of paths) {
+    try {
+      await stat(path)
+    } catch {
+      missing.push(path)
+    }
+  }
+  return missing
+}
+
+async function cmdBrief(args: string[], io: Io): Promise<number> {
+  const { values } = parseArgs({ args, options: { 'no-ingest': { type: 'boolean' } } })
+
+  const { registrations, errors } = await readAllRegistrations(io.env)
+  // A malformed record is skipped with a named error (spec §9), and the name
+  // has to reach a human: dropping it silently and calling the project
+  // unregistered sends the user to `hb register`, which would then write over
+  // the file they hand-edited.
+  for (const error of errors) io.err(`hb brief: skipped ${error.sourcePath}: ${error.message}`)
+
+  const project = resolveFrom(registrations, io.cwd)
+  if (!project) {
+    io.err(
+      errors.length > 0
+        ? `hb brief: ${io.cwd} matched no registered project, and the unreadable record${errors.length > 1 ? 's' : ''} above may be why. Repair the named file rather than registering again — \`hb register\` would write over it.`
+        : `hb brief: ${io.cwd} is not a registered project. Run \`hb register\` here first.`,
+    )
+    return 1
+  }
+
+  // Ingest first: Codex has no hooks, so its sessions reach the index only
+  // this way, and a brief that skipped it would be wrong in exactly the case
+  // it exists for. A failure costs freshness, never the brief itself.
+  let ingestError: string | null = null
+  if (!values['no-ingest']) {
+    try {
+      await syncArchive(io.env)
+      const db = openDb(io.env)
+      try {
+        await ingestAll(db, io.env)
+      } finally {
+        db.close()
+      }
+    } catch (error) {
+      ingestError = (error as Error).message
+    }
+  }
+
+  const db = openDb(io.env)
+  try {
+    // Merged and ordered before the limit, not concatenated and then sliced:
+    // `listNotes` orders within one slug, so cutting the concatenation meant a
+    // worktree slug's notes were never reached once the primary slug had ten
+    // of its own — the fragmentation §5.2 exists to undo. Note ids start with
+    // the date, so ordering by id descending is newest first, as `listNotes`
+    // itself orders.
+    const notes = project.slugs
+      .flatMap((slug) => listNotes(db, { project: slug, status: 'standing', limit: 10 }))
+      .sort((a, b) => b.id.localeCompare(a.id))
+      .slice(0, 10)
+    const notesTotal = project.slugs.reduce(
+      (total, slug) => total + countNotes(db, { project: slug, status: 'standing' }),
+      0,
+    )
+    // staleNoteIds(db, today) also flags notes whose review_after has passed,
+    // which the brief must not report here: it labels a note "stale — its
+    // evidence stopped matching", a claim that would be false for a note that
+    // is merely due for review. This inline query keeps to evidence only.
+    const staleIds = new Set(
+      (db
+        .prepare(
+          `SELECT DISTINCT note_id FROM note_evidence WHERE state IN ('changed', 'missing')`,
+        )
+        .all() as { note_id: string }[]).map((r) => r.note_id),
+    )
+
+    const session = project.slugs
+      .flatMap((slug) => listSessions(db, { project: slug, limit: 1 }))
+      .sort((a, b) => (b.started_at ?? '').localeCompare(a.started_at ?? ''))[0]
+
+    let lastExchange = null
+    if (session) {
+      const file = (await findTranscripts(io.env)).find((f) => f.sessionId === session.id)
+      const tail = file ? await readLastExchange(file.path) : { prompt: null, reply: null }
+      const harness = (db.prepare('SELECT harness FROM sessions WHERE id = ?').get(session.id) as
+        | { harness: string }
+        | undefined)?.harness
+      lastExchange = { harness: harness ?? 'unknown', when: session.started_at, ...tail }
+    }
+
+    const planPath = project.plan
+    let planSteps: string[] = []
+    // What the plan holds, not what fits: the brief says how many steps it is
+    // not showing, and it can only say that if it is told the real number.
+    let planStepsTotal = 0
+    if (planPath) {
+      try {
+        const text = await readFile(join(project.primaryPath, planPath), 'utf8')
+        const steps = text
+          .split('\n')
+          .filter((l) => /^- \[[ x]\] /.test(l))
+          .map((l) => l.replace(/^- \[[ x]\] /, '').replace(/\*\*/g, ''))
+        planStepsTotal = steps.length
+        planSteps = steps.slice(0, 12)
+      } catch {
+        // A plan pointing at a file that is not there is reported as the
+        // pointer alone; inventing steps for it would be worse than silence.
+      }
+    }
+
+    const brief = composeBrief({
+      name: project.registration.name,
+      git: await readGitState(io.cwd),
+      missingPaths: await missingOf(project.registration.paths),
+      planPath,
+      planSteps,
+      planStepsTotal,
+      notes: notes.map((n) => ({ id: n.id, title: n.title, stale: staleIds.has(n.id) })),
+      notesTotal,
+      lastExchange,
+      ingestError,
+    })
+    // The brief already ends in the newline after its closing instruction, and
+    // `io.out` terminates every line it is given — so the last one is handed
+    // over without it. Printing it whole would end the command with a blank
+    // line and spend a byte the composer's cap never budgeted for.
+    io.out(brief.replace(/\n$/, ''))
     return 0
   } finally {
     db.close()

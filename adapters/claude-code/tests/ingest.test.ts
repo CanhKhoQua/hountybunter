@@ -28,6 +28,25 @@ beforeEach(async () => {
 })
 
 describe('ingestAll', () => {
+  it('records the real directory a session ran in', async () => {
+    // The slug is one-way: `proj-a1b2c3` cannot be turned back into a path, so
+    // a session's actual working directory is lost unless it is kept. Spec 6.3
+    // declared this table for it and nothing ever wrote to it.
+    await stage('session-basic.jsonl', 'aaaa-1111')
+    await ingestAll(db, env, NOW)
+
+    const rows = db.prepare('SELECT * FROM projects').all() as Record<string, unknown>[]
+    expect(rows).toHaveLength(1)
+    expect(rows[0].path).toBe('/Users/x/proj')
+    expect(rows[0].name).toBe('proj')
+    // Joins to sessions.project, which is the slug of this same path.
+    expect(rows[0].slug).toBe(
+      (db.prepare('SELECT project FROM sessions WHERE id = ?').get('aaaa-1111') as { project: string }).project,
+    )
+    // When the directory was last worked in, so a picker can sort by it.
+    expect(rows[0].last_seen_at).toBe('2026-08-27T10:00:12.000Z')
+  })
+
   it('creates a session and its activities', async () => {
     await stage('session-basic.jsonl', 'aaaa-1111')
     const report = await ingestAll(db, env, NOW)
@@ -73,11 +92,6 @@ describe('ingestAll', () => {
       .all('bbbb-2222')
       .map((r) => (r as { kind: string }).kind)
     expect(kinds).toContain('brand-new-record-type')
-
-    const payload = db
-      .prepare("SELECT payload_json FROM activities WHERE kind = 'brand-new-record-type'")
-      .get() as { payload_json: string }
-    expect(JSON.parse(payload.payload_json).payload).toEqual({ a: 1 })
   })
 
   it('is idempotent — a second run adds nothing', async () => {

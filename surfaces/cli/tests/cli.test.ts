@@ -1,8 +1,8 @@
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { appendJot, openDb } from '@hountybunter/core'
+import { appendJot, openDb, readJots } from '@hountybunter/core'
 import { runCli, stopWeb, type Io } from '../src/bin.js'
 
 let out: string[]
@@ -31,6 +31,21 @@ describe('hb jot', () => {
   it('fails with a message when given no text', async () => {
     expect(await runCli(['jot'], io)).toBe(1)
     expect(err.join('\n')).toMatch(/text/i)
+  })
+
+  it('refuses a flag instead of recording it as the note', async () => {
+    // `hb jot --help` used to file a jot whose entire content was "--help".
+    // Swallowing an unrecognised flag as prose corrupts the store silently,
+    // which is worse than any error message.
+    expect(await runCli(['jot', '--help'], io)).toBe(1)
+    expect(err.join('\n')).toMatch(/--help/)
+    expect(await readJots({ env: io.env })).toHaveLength(0)
+  })
+
+  it('records a leading dash as text after an explicit --', async () => {
+    expect(await runCli(['jot', '--', '--help is the literal point'], io)).toBe(0)
+    const jots = await readJots({ env: io.env })
+    expect(jots[0]!.text).toBe('--help is the literal point')
   })
 })
 
@@ -187,8 +202,8 @@ describe('hb sessions', () => {
     const db = openDb(io.env)
     try {
       db.prepare(
-        `INSERT INTO sessions (id, project, started_at, title, correlation)
-         VALUES (?, ?, ?, ?, 'exact')`,
+        `INSERT INTO sessions (id, project, started_at, title, correlation, harness)
+         VALUES (?, ?, ?, ?, 'exact', 'claude-code')`,
       ).run(id, project, startedAt, title)
       db.prepare(`INSERT INTO activities (session_id, seq, kind) VALUES (?, 1, 'user')`).run(id)
     } finally {
@@ -225,8 +240,8 @@ describe('hb sessions', () => {
     const db = openDb(io.env)
     try {
       db.prepare(
-        `INSERT INTO sessions (id, project, started_at, title, correlation)
-         VALUES ('sess-3', 'proj-a', '2026-08-22T10:00:00.000Z', NULL, 'exact')`,
+        `INSERT INTO sessions (id, project, started_at, title, correlation, harness)
+         VALUES ('sess-3', 'proj-a', '2026-08-22T10:00:00.000Z', NULL, 'exact', 'claude-code')`,
       ).run()
     } finally {
       db.close()
@@ -310,5 +325,35 @@ describe('hb web', () => {
       expect(err.join('\n')).not.toMatch(/at .*\(.*:\d+:\d+\)/)
       expect(err.join('\n').length).toBeGreaterThan(0)
     }
+  })
+})
+
+describe('hb promote --drafted', () => {
+  it('marks a note an agent worded, so the store says who reasoned', async () => {
+    await runCli(['jot', 'bỏ payload_json'], io)
+    await runCli(
+      ['promote', '1', '--question', 'Giữ payload_json?', '--chosen', 'Bỏ', '--drafted'],
+      io,
+    )
+    const written = await readFile(
+      join(home, 'notes', 'myproject-1c9268', '2026-09-01-giu-payload-json.md'),
+      'utf8',
+    ).catch(async () => {
+      // The id carries today's date; find the one file rather than pin the date.
+      const dir = join(home, 'notes')
+      const project = (await readdir(dir))[0]!
+      const file = (await readdir(join(dir, project)))[0]!
+      return readFile(join(dir, project, file), 'utf8')
+    })
+    expect(written).toContain('origin: drafted')
+  })
+
+  it('is authored when the flag is absent', async () => {
+    await runCli(['jot', 'anything'], io)
+    await runCli(['promote', '1', '--question', 'q', '--chosen', 'c'], io)
+    const dir = join(home, 'notes')
+    const project = (await readdir(dir))[0]!
+    const file = (await readdir(join(dir, project)))[0]!
+    expect(await readFile(join(dir, project, file), 'utf8')).toContain('origin: authored')
   })
 })

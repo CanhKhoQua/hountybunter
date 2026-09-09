@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { dbPath } from '../paths.js'
 
-export const SCHEMA_VERSION = 1
+export const SCHEMA_VERSION = 5
 
 export class SchemaVersionError extends Error {
   constructor(

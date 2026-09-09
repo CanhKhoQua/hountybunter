@@ -1,17 +1,40 @@
+import { projectSlug } from '../paths.js'
 import { calendarDate, resolveTimeZone } from '../time.js'
-import type { Evidence, Note, RejectedOption } from '../types.js'
+import type { Evidence, Note, NoteOrigin, RejectedOption } from '../types.js'
 import { makeNoteId, writeNote } from './store.js'
 
 export interface DecisionInput {
   project: string
+  /**
+   * The directory `project` is the slug of, when the caller knows it.
+   *
+   * Kept only when hashing it reproduces `project`: a decision promoted from
+   * one repository about another would otherwise record a path pointing at the
+   * wrong place. Wrong is worse than absent here, so a mismatch is dropped.
+   */
+  projectPath?: string
   /** When the decision happened, ISO 8601 UTC — not when it was written up. */
   instant: string
   question: string
   chosen: string
+  /**
+   * Which write path this came through. Required, and deliberately not
+   * defaulted: a caller that has not said whether a person or an agent produced
+   * the reasoning should not be able to claim quietly that a person did.
+   */
+  origin: NoteOrigin
   title?: string
   rejected?: RejectedOption[]
   evidence?: Evidence[]
+  /** Ids of the notes this one replaces. */
+  supersedes?: string[]
   body?: string
+  /**
+   * How a path maps to a project slug. Defaults to the path-derived rule; the
+   * CLI passes the registration's, so a note written in a worktree keeps the
+   * directory it was written in.
+   */
+  slugOf?: (path: string) => string
 }
 
 export interface RecordOpts {
@@ -38,6 +61,10 @@ export async function recordDecision(input: DecisionInput, opts: RecordOpts = {}
     id: makeNoteId(title, input.instant, timeZone),
     title,
     project: input.project,
+    project_path:
+      input.projectPath && (input.slugOf ?? projectSlug)(input.projectPath) === input.project
+        ? input.projectPath
+        : null,
     kind: 'decision',
     status: 'standing',
     decided_on: calendarDate(input.instant, timeZone),
@@ -45,9 +72,11 @@ export async function recordDecision(input: DecisionInput, opts: RecordOpts = {}
     chosen,
     rejected: input.rejected ?? [],
     evidence: input.evidence ?? [],
+    verified: null,
     confidence: null,
     review_after: null,
-    supersedes: [],
+    origin: input.origin,
+    supersedes: input.supersedes ?? [],
     body: input.body ?? '',
     extra: {},
     sourcePath: '',

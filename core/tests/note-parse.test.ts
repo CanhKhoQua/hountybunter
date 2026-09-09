@@ -99,3 +99,90 @@ describe('parseNote', () => {
     expect(parseNote(raw, '/store/i.md').review_after).toBe('2027-02-01')
   })
 })
+
+describe('parseNote origin', () => {
+  it('reads the origin channel from frontmatter', () => {
+    const note = parseNote(
+      `---\nquestion: q\nchosen: c\norigin: drafted\n---\n\nbody\n`,
+      '/store/a.md',
+    )
+    expect(note.origin).toBe('drafted')
+  })
+
+  it('leaves origin unknown when the file does not say', () => {
+    // Every note written before this field existed lacks it. Defaulting to
+    // `authored` would assert a human wrote the reasoning — an inference
+    // presented as fact, which is the one thing the store must never do.
+    // An absent signal is rendered as absent.
+    expect(parseNote(MINIMAL, '/store/a.md').origin).toBe(null)
+  })
+
+  it('rejects an origin outside the vocabulary', () => {
+    expect(() =>
+      parseNote(`---\nquestion: q\nchosen: c\norigin: robot\n---\n`, '/store/a.md'),
+    ).toThrow(NoteParseError)
+  })
+
+  it('does not leak origin into extra', () => {
+    const note = parseNote(
+      `---\nquestion: q\nchosen: c\norigin: authored\n---\n`,
+      '/store/a.md',
+    )
+    expect(note.extra).not.toHaveProperty('origin')
+  })
+})
+
+describe('parseNote verified', () => {
+  it('reads the baseline a previous verification recorded', () => {
+    const note = parseNote(
+      `---\nid: n1\ntitle: t\nproject: p\nquestion: q?\nchosen: c\n` +
+        `evidence:\n  - {kind: file, ref: src/a.ts}\n` +
+        `verified:\n  on: 2026-09-02\n  refs:\n    - {ref: src/a.ts, hash: sha256:abc}\n---\n\nbody\n`,
+      '/store/n1.md',
+    )
+
+    expect(note.verified).toEqual({
+      on: '2026-09-02',
+      refs: [{ ref: 'src/a.ts', hash: 'sha256:abc' }],
+    })
+  })
+
+  it('treats a note that has never been verified as having no baseline', () => {
+    const note = parseNote('---\nid: n1\nquestion: q?\nchosen: c\n---\n\nbody\n', '/store/n1.md')
+    expect(note.verified).toBe(null)
+  })
+
+  it('drops a baseline entry with no ref rather than carrying a nameless one', () => {
+    // Hand-edited frontmatter is expected. A malformed entry must not throw: a
+    // person editing their own note must not be able to break reading it.
+    const note = parseNote(
+      `---\nid: n1\nquestion: q?\nchosen: c\n` +
+        `verified:\n  on: 2026-09-02\n  refs:\n    - {hash: sha256:abc}\n    - {ref: src/a.ts, hash: sha256:d}\n---\n\nb\n`,
+      '/store/n1.md',
+    )
+
+    expect(note.verified!.refs).toEqual([{ ref: 'src/a.ts', hash: 'sha256:d' }])
+  })
+
+  it('drops a baseline entry with no hash rather than treating an empty one as real', () => {
+    // `str(undefined)` is `''`, not `undefined` — and `''` compares unequal to
+    // any real hash, so a hand-edited entry missing its hash would otherwise
+    // read as `changed`, a false stale from exactly the hand-editing the
+    // no-ref tolerance above already exists for.
+    const note = parseNote(
+      `---\nid: n1\nquestion: q?\nchosen: c\n` +
+        `verified:\n  on: 2026-09-02\n  refs:\n    - {ref: src/a.ts}\n    - {ref: src/b.ts, hash: sha256:d}\n---\n\nb\n`,
+      '/store/n1.md',
+    )
+
+    expect(note.verified!.refs).toEqual([{ ref: 'src/b.ts', hash: 'sha256:d' }])
+  })
+
+  it('keeps the block out of extra, now that it is a field of its own', () => {
+    const note = parseNote(
+      `---\nid: n1\nquestion: q?\nchosen: c\nverified:\n  on: 2026-09-02\n  refs: []\n---\n\nb\n`,
+      '/store/n1.md',
+    )
+    expect(note.extra.verified).toBeUndefined()
+  })
+})

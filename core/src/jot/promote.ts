@@ -1,5 +1,5 @@
 import { recordDecision } from '../note/record.js'
-import type { Evidence, Note, RejectedOption } from '../types.js'
+import type { Evidence, Note, NoteOrigin, RejectedOption } from '../types.js'
 import type { Jot, JotOpts } from './store.js'
 
 export async function promoteJot(
@@ -10,6 +10,20 @@ export async function promoteJot(
     title?: string
     rejected?: RejectedOption[]
     evidence?: Evidence[]
+    origin?: NoteOrigin
+    supersedes?: string[]
+    /**
+     * Where the caller is standing. Recorded only if it hashes to the jot's
+     * project, so promoting from the wrong repository records nothing rather
+     * than a path that opens somewhere else.
+     */
+    projectPath?: string
+    /**
+     * How a path maps to a project slug. `promoteJot` spreads its input into
+     * `recordDecision`, so this reaches the guard above unchanged — the CLI
+     * passes the registration's resolver so a worktree's path survives.
+     */
+    slugOf?: (path: string) => string
   },
   opts: JotOpts = {},
 ): Promise<Note> {
@@ -17,7 +31,16 @@ export async function promoteJot(
   // decision happened, not when it was written up. The jot's text becomes the
   // note's first body paragraph.
   return recordDecision(
-    { ...input, project: jot.project, instant: jot.instant, body: `${jot.text}\n` },
+    {
+      ...input,
+      project: jot.project,
+      instant: jot.instant,
+      // A jot is a line the user typed and a promotion is answers they filled
+      // in, so `authored` is the default. A caller says otherwise when an agent
+      // did the wording and the user only approved it.
+      origin: input.origin ?? 'authored',
+      body: `${jot.text}\n`,
+    },
     { env: opts.env, timeZone: opts.timeZone },
   )
 }

@@ -5,6 +5,13 @@
   "type": "module",
   "main": "./src/server/serve.ts",
   "dependencies": {
-    "@hountybunter/core": "*"
+    "@hountybunter/core": "*",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@testing-library/user-event": "^14.6.6",
+    "tailwindcss": "^4.3.3"
   }
 }

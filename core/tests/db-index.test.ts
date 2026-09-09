@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { clearNoteIndex, indexNote, noteHash } from '../src/db/write.js'
 import { openDb } from '../src/db/open.js'
 import { parseNote } from '../src/note/parse.js'
+import { projectSlug } from '../src/paths.js'
 
 let env: NodeJS.ProcessEnv
 
@@ -29,6 +30,51 @@ evidence:
 
 Prose body about persisters.
 `
+
+/** A note that names the directory it was written in. */
+function placed(path: string, slug = projectSlug(path)) {
+  return parseNote(
+    `---\nid: n-placed\ntitle: Placed\nproject: ${slug}\nproject_path: ${path}\n` +
+      `question: q\nchosen: c\n---\n\nbody\n`,
+    '/store/n-placed.md',
+  )
+}
+
+describe('indexNote and where a project lives', () => {
+  it('records the directory a note was written in', () => {
+    // A decision can be recorded about a project no session ever ran inside —
+    // this repository is one, with six notes and no sessions. Without the path
+    // in the note file that project can be named and never opened, because the
+    // slug cannot be turned back into a directory.
+    const db = openDb(env)
+    indexNote(db, placed('/Users/x/myproject'))
+
+    expect(db.prepare('SELECT path, name FROM projects').get()).toEqual({
+      path: '/Users/x/myproject',
+      name: 'myproject',
+    })
+    db.close()
+  })
+
+  it('refuses a path that does not hash to the project it claims', () => {
+    // The slug is one-way but verifiable, and a note file is hand-editable. A
+    // path that does not produce this note's project describes some other
+    // directory, and recording it would offer to open the wrong repository.
+    const db = openDb(env)
+    indexNote(db, placed('/Users/x/myproject', 'someone-elses-000000'))
+
+    expect(db.prepare('SELECT COUNT(*) c FROM projects').get()).toEqual({ c: 0 })
+    db.close()
+  })
+
+  it('leaves a note that names no directory alone', () => {
+    // Every note written before the field existed. Absent, never guessed.
+    const db = openDb(env)
+    indexNote(db, parseNote(RAW, '/store/a.md'))
+    expect(db.prepare('SELECT COUNT(*) c FROM projects').get()).toEqual({ c: 0 })
+    db.close()
+  })
+})
 
 describe('indexNote', () => {
   it('inserts a row, its evidence, and its search text', () => {
@@ -84,7 +130,7 @@ body
   it('clearNoteIndex empties note tables only', () => {
     const db = openDb(env)
     indexNote(db, parseNote(RAW, '/store/a.md'))
-    db.prepare("INSERT INTO sessions (id, project) VALUES ('s1','p')").run()
+    db.prepare("INSERT INTO sessions (id, project, harness) VALUES ('s1','p','claude-code')").run()
     clearNoteIndex(db)
     expect(db.prepare('SELECT COUNT(*) c FROM notes').get()).toEqual({ c: 0 })
     expect(db.prepare('SELECT COUNT(*) c FROM notes_fts').get()).toEqual({ c: 0 })

@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { openDb } from '../src/db/open.js'
 import { receiveHookEvent } from '../src/hooks/receive.js'
-import { replaySpool } from '../src/hooks/spool.js'
+import { countSpooled, replaySpool } from '../src/hooks/spool.js'
 import { spoolFile } from '../src/paths.js'
 
 let env: NodeJS.ProcessEnv
@@ -31,6 +31,33 @@ async function spool(...lines: string[]) {
 function eventCount() {
   return (db.prepare('SELECT COUNT(*) n FROM hook_events').get() as { n: number }).n
 }
+
+describe('countSpooled', () => {
+  it('reports how many events are parked right now', async () => {
+    // An empty hook_events table has three possible causes: the plugin is not
+    // installed, the server was down and events are waiting, or nothing has
+    // happened yet. Until this, they were indistinguishable — and the first
+    // one is what was actually true here for a week.
+    await spool(event('a'), event('b'))
+    expect(await countSpooled(env)).toBe(2)
+  })
+
+  it('reports zero when nothing was ever parked', async () => {
+    // No spool file is the normal state, not a failure to report.
+    expect(await countSpooled(env)).toBe(0)
+  })
+
+  it('drops to zero once the spool is replayed', async () => {
+    await spool(event('a'))
+    await replaySpool(db, env)
+    expect(await countSpooled(env)).toBe(0)
+  })
+
+  it('does not count blank lines a hand-edited spool leaves behind', async () => {
+    await spool(event('a'), '', '  ')
+    expect(await countSpooled(env)).toBe(1)
+  })
+})
 
 describe('replaySpool', () => {
   it('brings in what arrived while nothing was listening', async () => {

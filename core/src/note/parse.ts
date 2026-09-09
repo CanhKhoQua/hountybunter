@@ -4,14 +4,18 @@ import {
   CONFIDENCES,
   EVIDENCE_KINDS,
   NOTE_KINDS,
+  NOTE_ORIGINS,
   NOTE_STATUSES,
   type Confidence,
   type Evidence,
   type Note,
   type NoteKind,
+  type NoteOrigin,
   type NoteStatus,
   type RejectedOption,
+  type Verified,
 } from '../types.js'
+import { dateStr, str } from '../frontmatter.js'
 
 export class NoteParseError extends Error {
   constructor(
@@ -26,26 +30,9 @@ export class NoteParseError extends Error {
 
 /** Frontmatter keys the schema knows. Everything else is preserved in `extra`. */
 const KNOWN_KEYS = new Set([
-  'id', 'title', 'project', 'kind', 'status', 'decided_on', 'question',
-  'chosen', 'rejected', 'evidence', 'confidence', 'review_after', 'supersedes',
+  'id', 'title', 'project', 'project_path', 'kind', 'status', 'decided_on', 'question',
+  'chosen', 'rejected', 'evidence', 'verified', 'confidence', 'review_after', 'supersedes', 'origin',
 ])
-
-function str(value: unknown): string {
-  return typeof value === 'string' ? value : value == null ? '' : String(value)
-}
-
-/**
- * Frontmatter dates need care. YAML 1.1 parses an unquoted `2026-08-12` into a
- * Date anchored at UTC midnight, and String(date) would render it in the
- * machine's local zone — shifting the calendar day west of UTC. Take the UTC
- * date components, which are exactly the day the file's author wrote.
- */
-function dateStr(value: unknown): string {
-  if (value instanceof Date) {
-    return Number.isNaN(value.getTime()) ? '' : value.toISOString().slice(0, 10)
-  }
-  return str(value)
-}
 
 function oneOf<T extends string>(
   value: unknown,
@@ -89,6 +76,28 @@ function parseEvidence(value: unknown): Evidence[] {
   })
 }
 
+function parseVerified(value: unknown): Verified | null {
+  if (value == null || typeof value !== 'object' || Array.isArray(value)) return null
+  const record = value as Record<string, unknown>
+  const refs = Array.isArray(record.refs)
+    ? record.refs.flatMap((entry) => {
+        if (entry == null || typeof entry !== 'object') return []
+        const row = entry as Record<string, unknown>
+        const ref = str(row.ref)
+        // A nameless baseline matches no evidence row, so it can only mislead.
+        if (!ref) return []
+        const hash = str(row.hash)
+        // A hand-edited entry with no hash is not the same as one with an
+        // empty-string hash: `''` is not `undefined`, so it would compare
+        // unequal to any real hash and read as `changed` — a false stale from
+        // exactly the hand-editing this tolerance exists for.
+        if (!hash) return []
+        return [{ ref, hash }]
+      })
+    : []
+  return { on: dateStr(record.on), refs }
+}
+
 function parseStringList(value: unknown): string[] {
   if (!Array.isArray(value)) return []
   return value.map(str).filter(Boolean)
@@ -116,6 +125,7 @@ export function parseNote(raw: string, sourcePath: string): Note {
     id: str(data.id) || basename(sourcePath).replace(/\.md$/, ''),
     title: str(data.title) || question,
     project: str(data.project),
+    project_path: str(data.project_path) || null,
     kind: oneOf<NoteKind>(data.kind, NOTE_KINDS, 'kind', sourcePath, 'decision')!,
     status: oneOf<NoteStatus>(data.status, NOTE_STATUSES, 'status', sourcePath, 'standing')!,
     decided_on: dateStr(data.decided_on) || null,
@@ -123,9 +133,11 @@ export function parseNote(raw: string, sourcePath: string): Note {
     chosen,
     rejected: parseRejected(data.rejected),
     evidence: parseEvidence(data.evidence),
+    verified: parseVerified(data.verified),
     confidence: oneOf<Confidence>(data.confidence, CONFIDENCES, 'confidence', sourcePath, null),
     review_after: dateStr(data.review_after) || null,
     supersedes: parseStringList(data.supersedes),
+    origin: oneOf<NoteOrigin>(data.origin, NOTE_ORIGINS, 'origin', sourcePath, null),
     body: parsed.content,
     extra,
     sourcePath,

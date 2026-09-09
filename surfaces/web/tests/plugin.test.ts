@@ -43,3 +43,22 @@ describe('the plugin manifest', () => {
     await expect(access(root + 'hooks/post-event.sh', constants.X_OK)).resolves.toBeUndefined()
   })
 })
+
+describe('the marketplace manifest', () => {
+  it('offers this repository as an installable plugin, so the README two commands work', async () => {
+    const marketplace = await json('marketplace.json')
+    const plugin = await json('plugin.json')
+
+    expect(marketplace.name).toBe('hountybunter')
+    const entry = marketplace.plugins?.find((p: { name: string }) => p.name === plugin.name)
+    expect(entry).toBeDefined()
+    // The plugin lives at the root of this same repository, not in a subdirectory.
+    expect(entry.source).toBe('./')
+  })
+
+  it('declares itself without borrowing the Claude Code name', async () => {
+    const marketplace = await json('marketplace.json')
+    // Spec 3.3: the product name may not contain "Claude Code".
+    expect(JSON.stringify(marketplace)).not.toMatch(/Claude Code/)
+  })
+})

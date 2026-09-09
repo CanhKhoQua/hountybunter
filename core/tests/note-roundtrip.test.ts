@@ -24,6 +24,7 @@ confidence: high
 review_after: 2027-02-01
 supersedes:
   - 2026-01-01-old-choice
+origin: drafted
 ---
 
 Prose body.
@@ -64,5 +65,15 @@ describe('note round trip', () => {
     expect(out).not.toMatch(/review_after/)
     expect(out).not.toMatch(/confidence/)
     expect(out).not.toMatch(/null/)
+  })
+
+  it('round-trips a note carrying a verification baseline', () => {
+    const source =
+      `---\nid: n1\ntitle: t\nproject: p\nkind: decision\nstatus: standing\n` +
+      `question: q?\nchosen: c\nevidence:\n  - kind: file\n    ref: src/a.ts\n` +
+      `verified:\n  on: 2026-09-02\n  refs:\n    - ref: src/a.ts\n      hash: sha256:abc\n---\n\nbody\n`
+    const note = parseNote(source, '/store/n1.md')
+
+    expect(parseNote(serializeNote(note), '/store/n1.md')).toEqual(note)
   })
 })

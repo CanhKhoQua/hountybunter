@@ -56,8 +56,8 @@ describe('receiveHookEvent', () => {
 
   it('upgrades a guessed session to exact without disturbing what ingest found', () => {
     db.prepare(
-      `INSERT INTO sessions (id, project, started_at, title, correlation)
-       VALUES ('sess-1', 'myproject-abc123', '2026-09-01T09:59:00.000Z', 'from the transcript', 'guessed')`,
+      `INSERT INTO sessions (id, project, started_at, title, correlation, harness)
+       VALUES ('sess-1', 'myproject-abc123', '2026-09-01T09:59:00.000Z', 'from the transcript', 'guessed', 'claude-code')`,
     ).run()
 
     receiveHookEvent(db, event)
@@ -67,6 +67,33 @@ describe('receiveHookEvent', () => {
     // The hook knows the id; the transcript knows the content. Neither wins twice.
     expect(session?.title).toBe('from the transcript')
     expect(session?.started_at).toBe('2026-09-01T09:59:00.000Z')
+  })
+
+  it('remembers the directory the hook came from', () => {
+    // A hook is the only thing that reports a directory while the session is
+    // still running, and the slug it derives cannot be turned back into a
+    // path. Without this, a project the store knows only through hooks can be
+    // named but never opened.
+    receiveHookEvent(db, event)
+
+    const row = db.prepare('SELECT * FROM projects').get() as Record<string, unknown>
+    expect(row.path).toBe('/Users/x/myproject')
+    expect(row.name).toBe('myproject')
+    // Deliberately absent: a real hook payload carries no timestamp, and a
+    // column filled in from one would read differently after a rebuild.
+    expect(row.last_seen_at).toBe(null)
+  })
+
+  it('leaves the timestamp a transcript established alone', () => {
+    db.prepare(
+      `INSERT INTO projects (path, slug, name, last_seen_at)
+       VALUES ('/Users/x/myproject', 'x', 'myproject', '2026-09-01T10:00:00.000Z')`,
+    ).run()
+
+    receiveHookEvent(db, event)
+
+    const row = db.prepare('SELECT last_seen_at FROM projects').get() as { last_seen_at: string }
+    expect(row.last_seen_at).toBe('2026-09-01T10:00:00.000Z')
   })
 
   it('keeps an unknown event kind, with its payload, instead of dropping it', () => {

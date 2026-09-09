@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3'
-import { projectSlug } from '@hountybunter/core'
+import { projectSlug, rememberProject } from '@hountybunter/core'
 import { readNewLines, saveCursor } from './cursor.js'
 import { findTranscripts } from './locate.js'
 import { extractToolUses, parseLine } from './parse-line.js'
@@ -13,8 +13,9 @@ export interface IngestReport {
 
 /**
  * Record types observed in real transcripts (143 files, 65,831 lines, 2026-08).
- * Anything outside this set is counted and kept with its payload, never dropped —
- * the format is undocumented and will change.
+ * Anything outside this set is counted and still gets a row, never dropped — the
+ * format is undocumented and will change. The record itself stays in the
+ * archive, which is where every record lives now.
  */
 const KNOWN_KINDS = new Set([
   'user', 'assistant', 'attachment', 'system',
@@ -35,9 +36,10 @@ export async function ingestAll(
   const report: IngestReport = { sessions: 0, activities: 0, skippedLines: 0, unknownKinds: {} }
 
   const upsertSession = db.prepare(
-    `INSERT INTO sessions (id, project, started_at, ended_at, branch, model, effort, title, correlation)
-     VALUES (@id, @project_for_insert, @started_at, @ended_at, @branch, @model, @effort, @title, 'exact')
+    `INSERT INTO sessions (id, project, started_at, ended_at, branch, model, effort, title, correlation, harness, parent_id)
+     VALUES (@id, @project_for_insert, @started_at, @ended_at, @branch, @model, @effort, @title, 'exact', 'claude-code', @parent_id)
      ON CONFLICT(id) DO UPDATE SET
+       parent_id  = COALESCE(excluded.parent_id, sessions.parent_id),
        project    = COALESCE(@project_observed, sessions.project),
        started_at = COALESCE(sessions.started_at, excluded.started_at),
        ended_at   = COALESCE(excluded.ended_at, sessions.ended_at),
@@ -48,8 +50,8 @@ export async function ingestAll(
   )
 
   const insertActivity = db.prepare(
-    `INSERT INTO activities (session_id, seq, ts, kind, tool_name, attr_skill, attr_plugin, payload_json)
-     VALUES (@session_id, @seq, @ts, @kind, @tool_name, @attr_skill, @attr_plugin, @payload_json)
+    `INSERT INTO activities (session_id, seq, ts, kind, tool_name, attr_skill, attr_plugin)
+     VALUES (@session_id, @seq, @ts, @kind, @tool_name, @attr_skill, @attr_plugin)
      ON CONFLICT(session_id, seq) DO NOTHING`,
   )
 
@@ -61,12 +63,14 @@ export async function ingestAll(
 
     let seq = (maxSeq.get(file.sessionId) as { m: number }).m
     let project: string | null = null
+    let cwdSeen: string | null = null
     let startedAt: string | null = null
     let endedAt: string | null = null
     let branch: string | null = null
     let model: string | null = null
     let effort: string | null = null
     let title: string | null = null
+    let parentId: string | null = null
     let added = 0
 
     db.transaction(() => {
@@ -80,6 +84,7 @@ export async function ingestAll(
         const raw = record.raw
         const cwd = str(raw.cwd)
         if (cwd && !project) project = projectSlug(cwd)
+        cwdSeen = cwd ?? cwdSeen
         // Last-wins, matching the upsert's COALESCE(excluded.x, sessions.x). Keeping
         // the first value seen in a run would make incremental ingest converge on the
         // newest and a full re-scan on the oldest, so the index would stop being
@@ -88,6 +93,12 @@ export async function ingestAll(
         model = str(raw.model) ?? model
         effort = str(raw.effort) ?? effort
         title = str(raw.aiTitle) ?? title
+
+        // A subagent transcript names its parent in `sessionId` while the file
+        // is named for the agent. When the two differ, this run happened inside
+        // another session — read from the record, never guessed from the path.
+        const declared = str(raw.sessionId)
+        if (declared && declared !== file.sessionId) parentId ??= declared
 
         const ts = str(raw.timestamp)
         if (ts) {
@@ -106,7 +117,6 @@ export async function ingestAll(
           kind: record.kind,
           attr_skill: str(raw.attributionSkill),
           attr_plugin: str(raw.attributionPlugin),
-          payload_json: JSON.stringify(raw),
         }
 
         seq += 1
@@ -129,7 +139,12 @@ export async function ingestAll(
         model,
         effort,
         title,
+        parent_id: parentId,
       })
+
+      // A subagent run reports the same directory as its parent and would only
+      // restate it, so the row is written from the session that owns the cwd.
+      if (cwdSeen) rememberProject(db, cwdSeen, endedAt)
 
       // Last, and inside the transaction: the cursor may only advance if the rows
       // it produced are committed with it.

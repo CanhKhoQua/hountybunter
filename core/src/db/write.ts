@@ -1,7 +1,38 @@
 import type Database from 'better-sqlite3'
 import { createHash } from 'node:crypto'
+import { basename } from 'node:path'
 import { serializeNote } from '../note/serialize.js'
+import { projectSlug } from '../paths.js'
+import type { Registration } from '../project/parse.js'
 import type { Note } from '../types.js'
+import type { NoteVerdict } from '../verify/note.js'
+
+/**
+ * Record that work happens in `path`, so the store can name a directory and
+ * not only its slug. Called from everywhere a real path is already in hand:
+ * transcript ingest, and a hook while the session is still running.
+ *
+ * `lastSeenAt` is optional because a hook payload carries no timestamp. When
+ * absent the stored value is kept, so a hook can never blank out what a
+ * transcript established and a rebuild converges on the transcript's answer.
+ */
+export function rememberProject(
+  db: Database.Database,
+  path: string,
+  lastSeenAt: string | null = null,
+): void {
+  db.prepare(
+    `INSERT INTO projects (path, slug, name, last_seen_at)
+     VALUES (@path, @slug, @name, @last_seen_at)
+     ON CONFLICT(path) DO UPDATE SET
+       last_seen_at = MAX(COALESCE(excluded.last_seen_at, ''), COALESCE(projects.last_seen_at, ''))`,
+  ).run({
+    path,
+    slug: projectSlug(path),
+    name: basename(path) || path,
+    last_seen_at: lastSeenAt,
+  })
+}
 
 /** Content hash of the note as it would be written to disk. */
 export function noteHash(note: Note): string {
@@ -10,6 +41,15 @@ export function noteHash(note: Note): string {
 
 export function indexNote(db: Database.Database, note: Note): void {
   db.transaction(() => {
+    // Where this note's project lives, if the note says so and the claim
+    // checks out. The slug is one-way but verifiable: hashing the path has to
+    // reproduce the project the note claims, or the path describes some other
+    // directory and opening it would open the wrong repository. A note file is
+    // hand-editable, so this is checked here and not only where it is written.
+    if (note.project_path && projectSlug(note.project_path) === note.project) {
+      rememberProject(db, note.project_path)
+    }
+
     db.prepare(
       `INSERT INTO notes (id, project, path, title, kind, status, decided_on,
                           confidence, review_after, hash)
@@ -59,10 +99,82 @@ export function indexNote(db: Database.Database, note: Note): void {
   })()
 }
 
+/**
+ * Store what a verification found.
+ *
+ * Evidence rows are owned by `indexNote`, which deletes and re-inserts them, so
+ * a verdict written here lives exactly as long as the reading that produced it:
+ * re-indexing a note drops it back to `unknown`, which is the honest answer
+ * until something looks again.
+ */
+export function recordVerification(db: Database.Database, verdict: NoteVerdict, at: string): void {
+  const update = db.prepare(
+    `UPDATE note_evidence SET state = ?, last_verified_at = ?
+     WHERE note_id = ? AND kind = ? AND ref = ?`,
+  )
+  const all = db.transaction(() => {
+    for (const ref of verdict.refs) update.run(ref.state, at, verdict.noteId, ref.kind, ref.ref)
+  })
+  all()
+}
+
+/**
+ * Forget every observed session, so they can be read from the archive again.
+ *
+ * Cursors go with them. Keeping a cursor while dropping the rows it produced
+ * would skip those lines forever; dropping a cursor while keeping the rows
+ * would re-read them under fresh seq numbers, which UNIQUE(session_id, seq)
+ * cannot catch. The two only make sense together.
+ */
+export function clearSessionIndex(db: Database.Database): void {
+  db.transaction(() => {
+    db.prepare('DELETE FROM activities').run()
+    db.prepare('DELETE FROM sessions').run()
+    db.prepare('DELETE FROM ingest_cursors').run()
+    // Derived from the same transcripts: a project left behind would name a
+    // directory no surviving session ran in.
+    db.prepare('DELETE FROM projects').run()
+  })()
+}
+
 export function clearNoteIndex(db: Database.Database): void {
   db.transaction(() => {
     db.prepare('DELETE FROM notes_fts').run()
     db.prepare('DELETE FROM note_evidence').run()
     db.prepare('DELETE FROM notes').run()
+  })()
+}
+
+export function clearRegistrationIndex(db: Database.Database): void {
+  db.transaction(() => {
+    db.prepare('DELETE FROM registered_paths').run()
+    db.prepare('DELETE FROM registered_projects').run()
+  })()
+}
+
+/** Mirror an authored record into the index. The file stays the truth. */
+export function indexRegistration(db: Database.Database, registration: Registration): void {
+  db.transaction(() => {
+    db.prepare(
+      `INSERT INTO registered_projects (slug, name, primary_path, plan, registered_at, source_path)
+       VALUES (@slug, @name, @primary_path, @plan, @registered_at, @source_path)
+       ON CONFLICT(slug) DO UPDATE SET
+         name = excluded.name, primary_path = excluded.primary_path,
+         plan = excluded.plan, registered_at = excluded.registered_at,
+         source_path = excluded.source_path`,
+    ).run({
+      slug: registration.slug,
+      name: registration.name,
+      primary_path: registration.paths[0],
+      plan: registration.plan,
+      registered_at: registration.registered_at,
+      source_path: registration.sourcePath,
+    })
+
+    const insertPath = db.prepare(
+      `INSERT INTO registered_paths (path, slug) VALUES (?, ?)
+       ON CONFLICT(path) DO UPDATE SET slug = excluded.slug`,
+    )
+    for (const path of registration.paths) insertPath.run(path, registration.slug)
   })()
 }

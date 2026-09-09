@@ -32,7 +32,10 @@ CREATE TABLE IF NOT EXISTS note_evidence (
   kind              TEXT NOT NULL,
   ref               TEXT NOT NULL,
   last_verified_at  TEXT,
-  ok                INTEGER NOT NULL DEFAULT 1,
+  -- verified | changed | missing | unknown. Defaults to unknown because
+  -- indexing a note is not checking it, and a default that read as a pass
+  -- would report a store nobody has looked at as a clean one.
+  state             TEXT NOT NULL DEFAULT 'unknown',
   PRIMARY KEY (note_id, kind, ref)
 );
 
@@ -55,9 +58,18 @@ CREATE TABLE IF NOT EXISTS sessions (
   model        TEXT,
   effort       TEXT,
   title        TEXT,
-  correlation  TEXT NOT NULL DEFAULT 'exact'
+  correlation  TEXT NOT NULL DEFAULT 'exact',
+  -- Which agent produced this session. NOT NULL with no default: every writer
+  -- knows which harness it is, so there is no row for which the answer is
+  -- unknown, and a default would be a claim rather than a fallback.
+  harness      TEXT NOT NULL,
+  -- Set when this session is a Task-tool run inside another. The transcript
+  -- says so itself: a subagent file carries its parent in `sessionId` and its
+  -- own id in `agentId`, so nothing here is inferred.
+  parent_id    TEXT
 );
 CREATE INDEX IF NOT EXISTS sessions_project_idx ON sessions(project);
+CREATE INDEX IF NOT EXISTS sessions_parent_idx ON sessions(parent_id);
 
 CREATE TABLE IF NOT EXISTS activities (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -68,7 +80,6 @@ CREATE TABLE IF NOT EXISTS activities (
   tool_name    TEXT,
   attr_skill   TEXT,
   attr_plugin  TEXT,
-  payload_json TEXT,
   UNIQUE (session_id, seq)
 );
 CREATE INDEX IF NOT EXISTS activities_session_idx ON activities(session_id);
@@ -91,3 +102,22 @@ CREATE TABLE IF NOT EXISTS hook_events (
   UNIQUE (session_id, kind, ts, payload_json)
 );
 CREATE INDEX IF NOT EXISTS hook_events_session_idx ON hook_events(session_id);
+
+-- Authored, unlike `projects`. `rememberProject` keeps every row of that table
+-- at slug = projectSlug(path); a registered worktree carries a declared slug
+-- that does not hash from its own path, so mixing the two would break that
+-- invariant. Separate tables make the authored/derived split structural.
+CREATE TABLE IF NOT EXISTS registered_projects (
+  slug           TEXT PRIMARY KEY,
+  name           TEXT NOT NULL,
+  primary_path   TEXT NOT NULL,
+  plan           TEXT,
+  registered_at  TEXT NOT NULL,
+  source_path    TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS registered_paths (
+  path  TEXT PRIMARY KEY,
+  slug  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS registered_paths_slug_idx ON registered_paths(slug);
