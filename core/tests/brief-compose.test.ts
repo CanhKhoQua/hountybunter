@@ -325,4 +325,121 @@ describe('composeBrief', () => {
     expect(accounted(blockOf(text, 'Done on this branch'), '- ')).toBe(76)
     expect(accounted(blockOf(text, 'Aiming at'), '- ')).toBe(70)
   })
+
+  it('keeps a short diffstat whole rather than empty it for no saving, when the commit list can give a little instead', () => {
+    // Regression for a real reproduction: a diffstat this short costs about as
+    // many bytes to replace with the marker as it saves, so giving it up
+    // should never happen while dropping a single commit already fits. At
+    // this exact cap the fixed blocks alone need trimming, and the only two
+    // honest outcomes are "keep the diffstat, drop one commit" (524 bytes) or
+    // the wasteful one this bug produced: empty the diffstat for nothing and
+    // still drop two commits (487 bytes) to compensate.
+    const commits = Array.from({ length: 5 }, (_, i) => `abc000${i} fix: short commit subject ${i}`)
+    const text = composeBrief(
+      {
+        name: 'x',
+        git: {
+          ok: true,
+          branch: 'b',
+          head: 'h',
+          dirty: [],
+          dirtyTotal: 0,
+          diffstat: ' core/src/a.ts | 3 +-',
+          defaultBranch: 'main',
+          commits,
+          commitsTotal: commits.length,
+        },
+        missingPaths: [],
+        planPath: null,
+        planSteps: [],
+        planStepsTotal: 0,
+        notes: [],
+        notesTotal: 0,
+        lastExchange: null,
+        ingestError: null,
+      },
+      524,
+    )
+
+    expect(Buffer.byteLength(text, 'utf8')).toBeLessThanOrEqual(524)
+    expect(blockOf(text, 'In flight now')).toContain('core/src/a.ts | 3 +-')
+    expect(blockOf(text, 'In flight now')).not.toMatch(/more, cut to fit/)
+    expect(blockOf(text, 'Done on this branch')).toMatch(/1 more, cut to fit/)
+  })
+
+  /**
+   * The byte size `composeBrief` would produce for the same input if the
+   * named block kept one more entry than it actually did — reconstructed from
+   * the block's own marker, since the composer exposes no way to ask for a
+   * keep count directly. `items` must be the exact list passed to that block
+   * (no producer-side truncation), so the dropped count equals its own length
+   * minus how many are shown.
+   */
+  function sizeIfOneMoreKept(text: string, title: string, items: string[], render: (item: string) => string): number | null {
+    const b = blockOf(text, title)
+    const match = /… (\d+) more, cut to fit/.exec(b)
+    if (!match) return null // nothing was dropped here; there is nothing to restore
+    const dropped = Number(match[1])
+    const kept = items.length - dropped
+    const restoredItem = render(items[kept])
+    const newMarker = dropped - 1 > 0 ? `\n… ${dropped - 1} more, cut to fit` : ''
+    const newBlock = b.slice(0, match.index) + restoredItem + newMarker + b.slice(match.index + match[0].length)
+    const at = text.indexOf(b)
+    return Buffer.byteLength(text.slice(0, at) + newBlock + text.slice(at + b.length), 'utf8')
+  }
+
+  it('reduces a rung only as far as it must, for a whole span of caps', () => {
+    // Short entries everywhere: a diffstat line, a commit subject, a plan
+    // step and a note title all cost about as much as the "… N more, cut to
+    // fit" marker that replaces the first one dropped — exactly the territory
+    // where the search used to zero a rung that had nothing to gain from it.
+    const diffstatLines = Array.from({ length: 10 }, (_, i) => ` f${i}.ts | 1 +`)
+    const commits = Array.from({ length: 10 }, (_, i) => `h${i} a`)
+    const planSteps = Array.from({ length: 10 }, (_, i) => `s${i}`)
+    const noteTitles = Array.from({ length: 10 }, (_, i) => `t${i}`)
+    const input: BriefInput = {
+      name: 'x',
+      git: {
+        ok: true,
+        branch: 'b',
+        head: 'h',
+        dirty: [],
+        dirtyTotal: 0,
+        diffstat: diffstatLines.join('\n'),
+        defaultBranch: 'main',
+        commits,
+        commitsTotal: commits.length,
+      },
+      missingPaths: [],
+      planPath: 'p.md',
+      planSteps,
+      planStepsTotal: planSteps.length,
+      notes: noteTitles.map((title, i) => ({ id: `n${i}`, title, stale: false })),
+      notesTotal: noteTitles.length,
+      lastExchange: null,
+      ingestError: null,
+    }
+
+    // Below this floor, even every rung emptied can't fit — the "print
+    // anyway, honesty beats obedience to a byte count" last resort, which the
+    // "gives up the uncommitted paths" test above already covers. The cap
+    // invariant only has content to say once the ladder has room to work.
+    const floor = Buffer.byteLength(composeBrief(input, 1), 'utf8')
+    const full = Buffer.byteLength(composeBrief(input, 100_000), 'utf8')
+
+    for (let cap = floor + 1; cap <= full; cap++) {
+      const text = composeBrief(input, cap)
+      expect(Buffer.byteLength(text, 'utf8')).toBeLessThanOrEqual(cap)
+
+      const restored = [
+        sizeIfOneMoreKept(text, 'In flight now', diffstatLines, (l) => l),
+        sizeIfOneMoreKept(text, 'Done on this branch', commits, (c) => `- ${c}`),
+        sizeIfOneMoreKept(text, 'Aiming at', planSteps, (s) => `- ${s}`),
+        sizeIfOneMoreKept(text, 'Already settled', noteTitles, (t) => `- ${t}`),
+      ]
+      for (const size of restored) {
+        if (size !== null) expect(size).toBeGreaterThan(cap)
+      }
+    }
+  })
 })

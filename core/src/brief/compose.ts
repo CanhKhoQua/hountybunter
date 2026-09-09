@@ -200,29 +200,53 @@ export function composeBrief(input: BriefInput, capBytes = 2048): string {
     return `${fixed}\n${exchangeHead}${kept}${CUT}${tail}`
   }
 
+  function sizeOf(): number {
+    return Buffer.byteLength(assemble(fixedBlocks()), 'utf8')
+  }
+
   function fits(): boolean {
-    return Buffer.byteLength(assemble(fixedBlocks()), 'utf8') <= capBytes
+    return sizeOf() <= capBytes
   }
 
   // Cutting the exchange down to its heading is sometimes not enough: the
   // fixed blocks themselves — two hundred diffstat lines, twenty commits — can
   // exceed the cap on their own. Give up each rung in turn, in priority order.
-  const ladder: { size: number; keep: (n: number) => void }[] = [
-    { size: diffstatLines.length, keep: (n) => { diffstatKeep = n } },
-    { size: input.planSteps.length, keep: (n) => { planStepsKeep = n } },
-    { size: git.commits.length, keep: (n) => { commitsKeep = n } },
-    { size: input.notes.length, keep: (n) => { notesKeep = n } },
-    { size: git.dirty.length, keep: (n) => { dirtyKeep = n } },
+  const ladder: { size: number; get: () => number; keep: (n: number) => void }[] = [
+    { size: diffstatLines.length, get: () => diffstatKeep, keep: (n) => { diffstatKeep = n } },
+    { size: input.planSteps.length, get: () => planStepsKeep, keep: (n) => { planStepsKeep = n } },
+    { size: git.commits.length, get: () => commitsKeep, keep: (n) => { commitsKeep = n } },
+    { size: input.notes.length, get: () => notesKeep, keep: (n) => { notesKeep = n } },
+    { size: git.dirty.length, get: () => dirtyKeep, keep: (n) => { dirtyKeep = n } },
   ]
 
   for (const rung of ladder) {
-    if (fits()) break
-    // The most this rung can keep, found by halving rather than by dropping
-    // one entry at a time: a large repository's diffstat runs to thousands of
-    // lines, and a pass per line would rebuild the whole brief thousands of
-    // times. Rendering only grows with the count, so the two agree.
-    let low = 0
-    let high = rung.size
+    const before = sizeOf()
+    if (before <= capBytes) break
+    if (rung.size === 0) continue
+
+    // Whether reducing this rung at all is worth the marker's one-time cost
+    // is not answered by trying a single entry: a short entry can lose to the
+    // marker on its own while several of them, taken together, still win. The
+    // marker is paid once no matter how much follows it, so the fair
+    // comparison is against giving up everything.
+    rung.keep(0)
+    if (sizeOf() >= before) {
+      // Even the best case for this rung — dropping it all — is no better
+      // than leaving it whole. Restore it and let the next rung take the cut.
+      rung.keep(rung.size)
+      continue
+    }
+
+    // Reduction helps, so find the largest keep that still fits rather than
+    // settling for zero: keep = 0 above only asked whether giving everything
+    // up beats not touching this rung at all, not whether some smaller
+    // sacrifice would do. From size - 1 down to 0 the marker is showing
+    // throughout, so every further entry dropped only gives back its own
+    // bytes — ground where halving instead of testing one at a time is safe:
+    // a large repository's diffstat runs to thousands of lines, and a pass
+    // per line would rebuild the whole brief thousands of times.
+    let low = 0 // keep = 0 was already measured above, so this floor is known
+    let high = rung.size - 1
     while (low < high) {
       const mid = Math.ceil((low + high) / 2)
       rung.keep(mid)
@@ -234,6 +258,38 @@ export function composeBrief(input: BriefInput, capBytes = 2048): string {
     // given everything, branch, head and the closing instruction are printed
     // anyway: honesty about the tree beats obedience to a byte count, and
     // every list that lost entries has already said so.
+  }
+
+  // A rung's turn on the ladder only sees the rungs after it still at full
+  // size, so it can end up cutting more than the final result needs once a
+  // later, less disposable rung also gives something up. Hand back whatever
+  // slack that left, starting with the least disposable rung: restoring only
+  // ever grows the output, so once a rung is confirmed to have no room for
+  // one more, that stays true no matter what an earlier rung in this reversed
+  // pass goes on to claim.
+  for (const rung of [...ladder].reverse()) {
+    const kept = rung.get()
+    if (kept >= rung.size) continue
+
+    // Restoring all the way back removes the marker — the same activation
+    // boundary the forward search has to treat specially, crossed here in
+    // the other direction. Try it directly rather than assume it fits.
+    rung.keep(rung.size)
+    if (fits()) continue
+
+    // A full restore doesn't fit, so find the most this rung can take back
+    // without one: from `kept` up to size - 1 the marker stays showing
+    // throughout, so more kept only ever costs more bytes — monotonic, and
+    // safe for halving instead of growing one entry at a time.
+    let low = kept
+    let high = rung.size - 1
+    while (low < high) {
+      const mid = Math.ceil((low + high) / 2)
+      rung.keep(mid)
+      if (fits()) low = mid
+      else high = mid - 1
+    }
+    rung.keep(low)
   }
 
   return assemble(fixedBlocks())
