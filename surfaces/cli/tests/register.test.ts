@@ -2,7 +2,7 @@ import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { projectsDir, readAllRegistrations, writeRegistration } from '@hountybunter/core'
+import { openDb, projectsDir, readAllRegistrations, writeRegistration } from '@hountybunter/core'
 import { runCli, type Io } from '../src/bin.js'
 
 let io: Io
@@ -83,6 +83,21 @@ describe('hb register', () => {
     // Byte for byte: the paths, plan, prose and unknown keys in that file are
     // the one thing in this design that nothing can regenerate.
     expect(await readFile(path, 'utf8')).toBe(broken)
+  })
+
+  it('indexes the registration it wrote, so `hb search` can find it without a rebuild', async () => {
+    await runCli(['register'], io)
+    const { registrations } = await readAllRegistrations(io.env)
+
+    const db = openDb(io.env)
+    try {
+      const row = db
+        .prepare('SELECT slug, primary_path FROM registered_projects WHERE slug = ?')
+        .get(registrations[0]!.slug)
+      expect(row).toEqual({ slug: registrations[0]!.slug, primary_path: '/w/proj' })
+    } finally {
+      db.close()
+    }
   })
 })
 
