@@ -3,12 +3,13 @@ import { clearNoteIndex, clearRegistrationIndex, indexNote, indexRegistration } 
 import { openDb } from './db/open.js'
 import { NoteParseError } from './note/parse.js'
 import { readAllNotes } from './note/store.js'
+import { RegistrationParseError } from './project/parse.js'
 import { readAllRegistrations } from './project/store.js'
 
 export interface RebuildReport {
   notesIndexed: number
   projectsRegistered: number
-  errors: NoteParseError[]
+  errors: (NoteParseError | RegistrationParseError)[]
 }
 
 /**
@@ -20,11 +21,9 @@ export interface RebuildReport {
 export async function rebuildFromDisk(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<RebuildReport> {
-  const { notes, errors } = await readAllNotes(env)
+  const { notes, errors: noteErrors } = await readAllNotes(env)
   const { registrations, errors: registrationErrors } = await readAllRegistrations(env)
-  for (const registrationError of registrationErrors) {
-    errors.push(new NoteParseError(registrationError.message, registrationError.sourcePath))
-  }
+  const errors: (NoteParseError | RegistrationParseError)[] = [...noteErrors, ...registrationErrors]
   const db = openDb(env)
   try {
     clearRegistrationIndex(db)

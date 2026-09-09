@@ -469,7 +469,9 @@ async function cmdVerify(args: string[], io: Io): Promise<number> {
  * than none, since `hb list` then reports nothing while the files are right
  * there.
  */
-async function rebuildEverything(io: Io): Promise<{ notes: number; sessions: number; errors: string[] }> {
+async function rebuildEverything(
+  io: Io,
+): Promise<{ notes: number; sessions: number; projects: number; errors: string[] }> {
   const db = openDb(io.env)
   let sessions: number
   try {
@@ -482,6 +484,7 @@ async function rebuildEverything(io: Io): Promise<{ notes: number; sessions: num
   return {
     notes: notes.notesIndexed,
     sessions,
+    projects: notes.projectsRegistered,
     errors: notes.errors.map((e) => `${e.sourcePath}: ${e.message}`),
   }
 }
@@ -491,8 +494,9 @@ async function cmdRebuild(args: string[], io: Io): Promise<number> {
 
   const report = await rebuildEverything(io)
   io.out(
-    `indexed ${report.notes} note${report.notes === 1 ? '' : 's'} and ` +
-      `${report.sessions} session${report.sessions === 1 ? '' : 's'}`,
+    `indexed ${report.notes} note${report.notes === 1 ? '' : 's'}, ` +
+      `${report.sessions} session${report.sessions === 1 ? '' : 's'} and ` +
+      `${report.projects} project${report.projects === 1 ? '' : 's'}`,
   )
   for (const error of report.errors) io.err(error)
 

@@ -96,6 +96,21 @@ describe('hb rebuild restores the whole index', () => {
     expect(said).toMatch(/1 session/)
   })
 
+  it('says how many projects it restored, with correct pluralisation', async () => {
+    out.length = 0
+    await runCli(['rebuild'], io)
+    // No project was registered in this store, so the count must still show —
+    // a reader cannot tell "none" from "not supported" if the number is silent.
+    expect(out.join('\n')).toContain('indexed 1 note, 1 session and 0 projects')
+  })
+
+  it('uses the singular for exactly one project', async () => {
+    await runCli(['register', live], io)
+    out.length = 0
+    await runCli(['rebuild'], io)
+    expect(out.join('\n')).toContain('indexed 1 note, 1 session and 1 project')
+  })
+
   it('--verify compares sessions too, not just notes', async () => {
     expect(await runCli(['rebuild', '--verify'], io)).toBe(0)
     expect(out.join('\n')).toMatch(/identical state/)
