@@ -374,25 +374,53 @@ describe('composeBrief', () => {
    * keep count directly. `items` must be the exact list passed to that block
    * (no producer-side truncation), so the dropped count equals its own length
    * minus how many are shown.
+   *
+   * `section` bounds the search within the block, because "In flight now"
+   * holds two independent trimmable lists — the dirty paths under
+   * "uncommitted:" and the diffstat under "diffstat:" — and each can carry
+   * its own marker; without a bound, the first marker in the block would be
+   * mistaken for the one belonging to the other list.
    */
-  function sizeIfOneMoreKept(text: string, title: string, items: string[], render: (item: string) => string): number | null {
+  function sizeIfOneMoreKept(
+    text: string,
+    title: string,
+    items: string[],
+    render: (item: string) => string,
+    section?: { start: string; end?: string },
+  ): number | null {
     const b = blockOf(text, title)
-    const match = /… (\d+) more, cut to fit/.exec(b)
+    let searchStart = 0
+    let searchEnd = b.length
+    if (section) {
+      const s = b.indexOf(section.start)
+      if (s === -1) return null // this list's own section isn't even present
+      searchStart = s
+      if (section.end) {
+        const e = b.indexOf(section.end, s)
+        if (e !== -1) searchEnd = e
+      }
+    }
+    const match = /… (\d+) more, cut to fit/.exec(b.slice(searchStart, searchEnd))
     if (!match) return null // nothing was dropped here; there is nothing to restore
+    const matchIndex = searchStart + match.index
     const dropped = Number(match[1])
     const kept = items.length - dropped
     const restoredItem = render(items[kept])
     const newMarker = dropped - 1 > 0 ? `\n… ${dropped - 1} more, cut to fit` : ''
-    const newBlock = b.slice(0, match.index) + restoredItem + newMarker + b.slice(match.index + match[0].length)
+    const newBlock = b.slice(0, matchIndex) + restoredItem + newMarker + b.slice(matchIndex + match[0].length)
     const at = text.indexOf(b)
     return Buffer.byteLength(text.slice(0, at) + newBlock + text.slice(at + b.length), 'utf8')
   }
 
   it('reduces a rung only as far as it must, for a whole span of caps', () => {
-    // Short entries everywhere: a diffstat line, a commit subject, a plan
-    // step and a note title all cost about as much as the "… N more, cut to
-    // fit" marker that replaces the first one dropped — exactly the territory
-    // where the search used to zero a rung that had nothing to gain from it.
+    // Short entries everywhere: a dirty path, a diffstat line, a commit
+    // subject, a plan step and a note title all cost about as much as the
+    // "… N more, cut to fit" marker that replaces the first one dropped —
+    // exactly the territory where the search used to zero a rung that had
+    // nothing to gain from it. The dirty list gets several entries, not one,
+    // so partial trimming of it — and the backfill handing entries back to
+    // it — are both reachable, not just its all-or-nothing ends.
+    const dirtyLines = Array.from({ length: 10 }, (_, i) => ` M d${i}.ts`)
     const diffstatLines = Array.from({ length: 10 }, (_, i) => ` f${i}.ts | 1 +`)
     const commits = Array.from({ length: 10 }, (_, i) => `h${i} a`)
     const planSteps = Array.from({ length: 10 }, (_, i) => `s${i}`)
@@ -403,8 +431,8 @@ describe('composeBrief', () => {
         ok: true,
         branch: 'b',
         head: 'h',
-        dirty: [],
-        dirtyTotal: 0,
+        dirty: dirtyLines,
+        dirtyTotal: dirtyLines.length,
         diffstat: diffstatLines.join('\n'),
         defaultBranch: 'main',
         commits,
@@ -432,7 +460,11 @@ describe('composeBrief', () => {
       expect(Buffer.byteLength(text, 'utf8')).toBeLessThanOrEqual(cap)
 
       const restored = [
-        sizeIfOneMoreKept(text, 'In flight now', diffstatLines, (l) => l),
+        sizeIfOneMoreKept(text, 'In flight now', dirtyLines, (l) => `  ${l}`, {
+          start: 'uncommitted:',
+          end: 'diffstat:',
+        }),
+        sizeIfOneMoreKept(text, 'In flight now', diffstatLines, (l) => l, { start: 'diffstat:' }),
         sizeIfOneMoreKept(text, 'Done on this branch', commits, (c) => `- ${c}`),
         sizeIfOneMoreKept(text, 'Aiming at', planSteps, (s) => `- ${s}`),
         sizeIfOneMoreKept(text, 'Already settled', noteTitles, (t) => `- ${t}`),
