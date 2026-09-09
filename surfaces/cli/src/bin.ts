@@ -768,6 +768,7 @@ async function cmdBrief(args: string[], io: Io): Promise<number> {
 
     const brief = composeBrief({
       name: project.registration.name,
+      slug: project.slug,
       git: await readGitState(io.cwd),
       missingPaths: await missingOf(project.registration.paths),
       planPath,

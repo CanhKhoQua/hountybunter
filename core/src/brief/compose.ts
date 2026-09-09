@@ -15,6 +15,8 @@ export interface LastExchange {
 
 export interface BriefInput {
   name: string
+  /** The project's registered slug, for the `hb list` pointer in "Already settled". */
+  slug: string
   git: GitState
   /** Registered directories that are no longer on disk. Reported, never pruned. */
   missingPaths: string[]
@@ -162,12 +164,19 @@ export function composeBrief(input: BriefInput, capBytes = 2048): string {
         ]
       : []
 
-    const settled = trimmed(
-      input.notes,
-      notesKeep,
-      input.notesTotal,
-      (n) => `- ${n.title}${n.stale ? '  (stale — its evidence stopped matching)' : ''}`,
-    )
+    const settled = [
+      ...trimmed(
+        input.notes,
+        notesKeep,
+        input.notesTotal,
+        (n) => `- ${n.title}${n.stale ? '  (stale — its evidence stopped matching)' : ''}`,
+      ),
+      // Only when the block names something: a title alone isn't a rejection,
+      // so this is what points the reader at where the reasoning actually
+      // lives. Pointing there when the project has no notes at all would be
+      // an instruction about nothing.
+      ...(input.notesTotal > 0 ? [`Run \`hb list --project ${input.slug}\` to read why, and what it ruled out.`] : []),
+    ]
 
     return [
       head,
