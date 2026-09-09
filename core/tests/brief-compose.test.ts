@@ -12,10 +12,14 @@ const base: BriefInput = {
     diffstat: ' core/src/a.ts | 3 +-',
     defaultBranch: 'main',
     commits: ['bf70b99 fix(core): a hand-edited baseline'],
+    commitsTotal: 1,
+    dirtyTotal: 1,
   },
   planPath: 'docs/superpowers/plans/p.md',
   planSteps: ['Step 1: Write the failing test', 'Step 2: Implement'],
+  planStepsTotal: 2,
   notes: [{ id: 'n1', title: 'SQLite over Postgres', stale: false }],
+  notesTotal: 1,
   lastExchange: {
     harness: 'claude-code',
     when: '2026-09-08T10:00:00.000Z',
@@ -48,10 +52,22 @@ describe('composeBrief', () => {
   it('prints absence as absence rather than as nothing to do', () => {
     const text = composeBrief({
       ...base,
-      git: { ok: false, branch: null, head: null, dirty: [], diffstat: null, defaultBranch: null, commits: [] },
+      git: {
+        ok: false,
+        branch: null,
+        head: null,
+        dirty: [],
+        dirtyTotal: 0,
+        diffstat: null,
+        defaultBranch: null,
+        commits: [],
+        commitsTotal: 0,
+      },
       planPath: null,
       planSteps: [],
+      planStepsTotal: 0,
       notes: [],
+      notesTotal: 0,
       lastExchange: null,
     })
     expect(text).toMatch(/absent/i)
@@ -130,11 +146,15 @@ describe('composeBrief', () => {
       git: {
         ...base.git,
         commits,
+        commitsTotal: commits.length,
         dirty,
+        dirtyTotal: dirty.length,
         diffstat: ' 5 files changed, 120 insertions(+), 40 deletions(-)',
       },
       planSteps,
+      planStepsTotal: planSteps.length,
       notes,
+      notesTotal: notes.length,
     })
 
     expect(Buffer.byteLength(text, 'utf8')).toBeLessThanOrEqual(2048)
@@ -150,17 +170,30 @@ describe('composeBrief', () => {
     // only the notes block's own text is under test.
     const withoutNote: BriefInput = {
       name: 'x',
-      git: { ok: true, branch: 'b', head: 'h', dirty: [], diffstat: null, defaultBranch: 'main', commits: [] },
+      git: {
+        ok: true,
+        branch: 'b',
+        head: 'h',
+        dirty: [],
+        dirtyTotal: 0,
+        diffstat: null,
+        defaultBranch: 'main',
+        commits: [],
+        commitsTotal: 0,
+      },
       missingPaths: [],
       planPath: null,
       planSteps: [],
+      planStepsTotal: 0,
       notes: [],
+      notesTotal: 0,
       lastExchange: { harness: 'claude-code', when: null, prompt: 'p', reply: 'r' },
       ingestError: null,
     }
     const withOneNote: BriefInput = {
       ...withoutNote,
       notes: [{ id: 'n1', title: 'a note long enough to matter once it is dropped', stale: false }],
+      notesTotal: 1,
     }
 
     // Isolate the "Already settled" block: commits and the plan are also
@@ -180,5 +213,116 @@ describe('composeBrief', () => {
     const trimmedText = composeBrief(withOneNote, tightCap)
     expect(settledBlock(trimmedText)).not.toContain('_absent_')
     expect(settledBlock(trimmedText)).toMatch(/more, cut to fit/)
+  })
+
+  /** Which `## ` block of the brief, given its title. */
+  function blockOf(text: string, title: string): string {
+    return text.split(/\n(?=## )/).find((b) => b.startsWith(`## ${title}`)) ?? ''
+  }
+
+  /** A brief whose only large part is a diffstat covering `files` changed files. */
+  function withDiffstat(files: number): BriefInput {
+    const names = Array.from({ length: files }, (_, i) => `core/src/some/nested/file-${i}.ts`)
+    return {
+      ...base,
+      git: {
+        ...base.git,
+        diffstat: [
+          ...names.map((n) => ` ${n} | 12 ++++++------`),
+          ` ${files} files changed, ${files * 8} insertions(+), ${files * 4} deletions(-)`,
+        ].join('\n'),
+      },
+    }
+  }
+
+  it('holds the cap however many files the diffstat covers', () => {
+    // `git.dirty` is capped by its producer; the diffstat is not, and it grew
+    // to 4x the cap at 200 changed files because it was never on the ladder.
+    for (const files of [30, 60, 200]) {
+      expect(Buffer.byteLength(composeBrief(withDiffstat(files)), 'utf8')).toBeLessThanOrEqual(2048)
+    }
+  })
+
+  it('sacrifices the diffstat before the notes, because one git command reproduces it', () => {
+    const text = composeBrief(withDiffstat(200))
+    // The notes are the anti-rewalk protection; `git diff --stat` is one command.
+    expect(text).toContain('SQLite over Postgres')
+    expect(blockOf(text, 'In flight now')).toMatch(/more, cut to fit/)
+  })
+
+  it('never leaves a cut marker with nothing for it to be about', () => {
+    // Truncating the exchange at a deeply negative budget used to erase its
+    // own heading — and, with no exchange at all, the absent marker — leaving
+    // the brief claiming a cut where it showed the reader nothing.
+    for (const cap of [120, 200, 400, 800, 1200, 2048]) {
+      for (const input of [withDiffstat(200), { ...withDiffstat(200), lastExchange: null }]) {
+        const text = composeBrief(input, cap)
+        const heading = text.indexOf('## Last exchange')
+        expect(heading).toBeGreaterThan(-1)
+        expect(text.slice(heading)).toMatch(/^## Last exchange[^\n]*\n\n(_absent_|you: |… cut to fit\n)/)
+        // Every list marker carries its count; a bare one has no subject.
+        expect(text.slice(0, heading)).not.toMatch(/^… cut to fit$/m)
+      }
+    }
+  })
+
+  it('gives up the uncommitted paths only when nothing else is left to give', () => {
+    // The working tree is the evidence a session dying mid-edit left behind,
+    // so it is the last rung: this fixture has nothing else on the ladder.
+    const dirty = Array.from(
+      { length: 20 },
+      (_, i) => ` M core/src/a/deliberately/long/and/deeply/nested/path/that/eats/the/whole/budget/file-${i}.ts`,
+    )
+    const text = composeBrief({
+      ...base,
+      git: {
+        ...base.git,
+        dirty,
+        dirtyTotal: dirty.length,
+        diffstat: null,
+        commits: [],
+        commitsTotal: 0,
+      },
+      planPath: null,
+      planSteps: [],
+      planStepsTotal: 0,
+      notes: [],
+      notesTotal: 0,
+      lastExchange: null,
+    })
+
+    expect(Buffer.byteLength(text, 'utf8')).toBeLessThanOrEqual(2048)
+    expect(text).toContain('branch: feat/x')
+    expect(text).toContain('head: ac3b33f merge: note staleness')
+    expect(blockOf(text, 'In flight now')).toMatch(/more, cut to fit/)
+  })
+
+  it('counts what its caller cut before handing the list over, not only what it cut itself', () => {
+    // The real numbers on this branch: 76 commits and 70 plan steps, of which
+    // the producers pass on 20 and 12. A count of what the composer alone
+    // dropped would tell the reader the branch holds 20 commits.
+    const commits = Array.from(
+      { length: 20 },
+      (_, i) => `${(1000 + i).toString(16)} fix(core): a realistically long commit subject ${i}`,
+    )
+    const planSteps = Array.from(
+      { length: 12 },
+      (_, i) => `Step ${i + 1}: a reasonably long and descriptive plan step title`,
+    )
+    const text = composeBrief({
+      ...base,
+      git: { ...base.git, commits, commitsTotal: 76, diffstat: null },
+      planSteps,
+      planStepsTotal: 70,
+    })
+
+    function accounted(block: string, bullet: string): number {
+      const kept = block.split('\n').filter((l) => l.startsWith(bullet)).length
+      const dropped = Number(/… (\d+) more, cut to fit/.exec(block)?.[1] ?? 0)
+      return kept + dropped
+    }
+
+    expect(accounted(blockOf(text, 'Done on this branch'), '- ')).toBe(76)
+    expect(accounted(blockOf(text, 'Aiming at'), '- ')).toBe(70)
   })
 })

@@ -8,6 +8,7 @@ import {
   appendJot,
   calendarDate,
   composeBrief,
+  countNotes,
   indexNote,
   listNotes,
   listSessions,
@@ -659,9 +660,20 @@ async function cmdBrief(args: string[], io: Io): Promise<number> {
 
   const db = openDb(io.env)
   try {
+    // Merged and ordered before the limit, not concatenated and then sliced:
+    // `listNotes` orders within one slug, so cutting the concatenation meant a
+    // worktree slug's notes were never reached once the primary slug had ten
+    // of its own — the fragmentation §5.2 exists to undo. Note ids start with
+    // the date, so ordering by id descending is newest first, as `listNotes`
+    // itself orders.
     const notes = project.slugs
       .flatMap((slug) => listNotes(db, { project: slug, status: 'standing', limit: 10 }))
+      .sort((a, b) => b.id.localeCompare(a.id))
       .slice(0, 10)
+    const notesTotal = project.slugs.reduce(
+      (total, slug) => total + countNotes(db, { project: slug, status: 'standing' }),
+      0,
+    )
     // staleNoteIds(db, today) also flags notes whose review_after has passed,
     // which the brief must not report here: it labels a note "stale — its
     // evidence stopped matching", a claim that would be false for a note that
@@ -690,14 +702,18 @@ async function cmdBrief(args: string[], io: Io): Promise<number> {
 
     const planPath = project.plan
     let planSteps: string[] = []
+    // What the plan holds, not what fits: the brief says how many steps it is
+    // not showing, and it can only say that if it is told the real number.
+    let planStepsTotal = 0
     if (planPath) {
       try {
         const text = await readFile(join(project.primaryPath, planPath), 'utf8')
-        planSteps = text
+        const steps = text
           .split('\n')
           .filter((l) => /^- \[[ x]\] /.test(l))
           .map((l) => l.replace(/^- \[[ x]\] /, '').replace(/\*\*/g, ''))
-          .slice(0, 12)
+        planStepsTotal = steps.length
+        planSteps = steps.slice(0, 12)
       } catch {
         // A plan pointing at a file that is not there is reported as the
         // pointer alone; inventing steps for it would be worse than silence.
@@ -711,7 +727,9 @@ async function cmdBrief(args: string[], io: Io): Promise<number> {
         missingPaths: await missingOf(project.registration.paths),
         planPath,
         planSteps,
+        planStepsTotal,
         notes: notes.map((n) => ({ id: n.id, title: n.title, stale: staleIds.has(n.id) })),
+        notesTotal,
         lastExchange,
         ingestError,
       }),

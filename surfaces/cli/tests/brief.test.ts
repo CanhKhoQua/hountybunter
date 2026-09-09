@@ -1,15 +1,17 @@
-import { mkdtemp } from 'node:fs/promises'
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
+import { parseNote, projectSlug, readAllRegistrations, writeNote, writeRegistration } from '@hountybunter/core'
 import { runCli, type Io } from '../src/bin.js'
 
 let io: Io
+let home: string
 let out: string[]
 let err: string[]
 
 beforeEach(async () => {
-  const home = await mkdtemp(join(tmpdir(), 'hb-brief-'))
+  home = await mkdtemp(join(tmpdir(), 'hb-brief-'))
   const live = await mkdtemp(join(tmpdir(), 'hb-brief-live-'))
   out = []
   err = []
@@ -43,5 +45,60 @@ describe('hb brief', () => {
   it('refuses a flag it does not know instead of ignoring it', async () => {
     await runCli(['register'], io)
     expect(await runCli(['brief', '--wat'], io)).toBe(1)
+  })
+
+  /** A standing note filed under `slug`, on disk for `hb rebuild` to index. */
+  async function seedNote(slug: string, id: string, title: string): Promise<void> {
+    const note = parseNote(
+      `---\nid: ${id}\ntitle: ${title}\nproject: ${slug}\nkind: decision\n` +
+        `status: standing\nquestion: q?\nchosen: c\n---\n\nbody\n`,
+      join(home, 'notes', slug, `${id}.md`),
+    )
+    await writeNote(note, io.env)
+  }
+
+  it('says how many plan steps the plan holds, not how many it was handed', async () => {
+    const project = await mkdtemp(join(tmpdir(), 'hb-brief-plan-'))
+    const steps = Array.from(
+      { length: 30 },
+      (_, i) => `- [ ] Step ${i + 1}: a plan step with a realistically descriptive title`,
+    )
+    await writeFile(join(project, 'plan.md'), `${steps.join('\n')}\n`, 'utf8')
+
+    const where = { ...io, cwd: project }
+    await runCli(['register', '--plan', 'plan.md'], where)
+    out.length = 0
+    expect(await runCli(['brief', '--no-ingest'], where)).toBe(0)
+
+    const aiming = out.join('\n').split(/\n(?=## )/).find((b) => b.startsWith('## Aiming at'))!
+    const kept = aiming.split('\n').filter((l) => l.startsWith('- ')).length
+    const dropped = Number(/… (\d+) more, cut to fit/.exec(aiming)?.[1] ?? 0)
+    expect(dropped).toBeGreaterThan(0)
+    expect(kept + dropped).toBe(30)
+  })
+
+  it("reaches a worktree's notes rather than stopping at the first slug's ten", async () => {
+    const main = await mkdtemp(join(tmpdir(), 'hb-brief-main-'))
+    const worktree = await mkdtemp(join(tmpdir(), 'hb-brief-wt-'))
+    const where = { ...io, cwd: main }
+    await runCli(['register'], where)
+
+    // Join the worktree to the project, as registering from inside it would.
+    const { registrations } = await readAllRegistrations(io.env)
+    await writeRegistration({ ...registrations[0]!, paths: [main, worktree] }, io.env)
+
+    for (let i = 0; i < 10; i++) {
+      await seedNote(projectSlug(main), `2026-09-0${1 + (i % 3)}-older-${i}`, `older decision ${i}`)
+    }
+    await seedNote(projectSlug(worktree), '2026-09-08-newest', 'newest decision, in the worktree')
+    await runCli(['rebuild'], where)
+
+    out.length = 0
+    expect(await runCli(['brief', '--no-ingest'], where)).toBe(0)
+    const text = out.join('\n')
+    // Concatenating ten notes per slug and slicing to ten never reached this one.
+    expect(text).toContain('newest decision, in the worktree')
+    // And it is ordered by date across both slugs, not by which slug was read first.
+    expect(text.indexOf('newest decision')).toBeLessThan(text.indexOf('older decision'))
   })
 })
