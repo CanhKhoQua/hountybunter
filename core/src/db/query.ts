@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import type Database from 'better-sqlite3'
 import type { Note } from '../types.js'
 
@@ -254,13 +255,23 @@ export function staleNoteIds(db: Database.Database, today: string): Set<string> 
  * it wins; the `projects` row is the fallback for notes written before that
  * field existed. Null when neither answers — which the caller must read as
  * "cannot check", never as "nothing changed".
+ *
+ * A candidate path is also rejected if it no longer exists — most often a git
+ * worktree that has since been removed, which is ordinary. A directory that
+ * is not there cannot be checked, so the honest answer is "unknown", not
+ * "missing", the same call 03ac13e made for an unreadable file. This is why
+ * a missing note.project_path does not fall through to the projects row:
+ * that row names a different working tree than the one the note's author
+ * looked at, and reporting against it would trade a false "stale" for a
+ * false "evidence changed".
  */
 export function projectPathFor(db: Database.Database, note: Note): string | null {
-  if (note.project_path) return note.project_path
+  if (note.project_path) return existsSync(note.project_path) ? note.project_path : null
   const row = db.prepare('SELECT path FROM projects WHERE slug = ?').get(note.project) as
     | { path: string }
     | undefined
-  return row?.path ?? null
+  if (!row?.path) return null
+  return existsSync(row.path) ? row.path : null
 }
 
 /**
